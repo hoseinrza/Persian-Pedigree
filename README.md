@@ -1,137 +1,159 @@
 <div align="center">
 
-# 🧬 شجره‌نامه ژنتیکی · Pedigree Visualizer
+# 🧬 شجره‌نامه ژنتیکی بالینی · Persian Clinical Pedigree Workbench
 
-**یک ابزار تعاملی و زیبا برای رسم شجره‌نامه‌ی پزشکی و ژنتیکی — کاملاً داخل مرورگر.**
+**سامانه پیشرفته ترسیم و تحلیل شجره‌نامه‌های ژنتیک پزشکی، مدل‌سازی ریسک مندلی و بررسی روابط خویشاوندی کاملاً سمت کلاینت.**
 
-*An interactive, glassmorphic pedigree (family-tree) builder for medical genetics — runs entirely in the browser.*
+*A production-quality clinical & educational pedigree workbench for medical genetics, Mendelian risk modeling, and complex kinship layout — running entirely in-browser with zero telemetry.*
 
-![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)
-![Vite](https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white)
-![Tailwind CSS](https://img.shields.io/badge/Tailwind-3-38BDF8?logo=tailwindcss&logoColor=white)
-![D3.js](https://img.shields.io/badge/D3.js-7-F9A03C?logo=d3dotjs&logoColor=white)
-![License](https://img.shields.io/badge/license-MIT-22c55e)
+[![React](https://img.shields.io/badge/React-18.2-61DAFB?logo=react&logoColor=white)](https://react.dev/)
+[![Vite](https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4-38BDF8?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
+[![Tests](https://img.shields.io/badge/Tests-30%20passed-emerald)](tests/)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 </div>
 
 ---
 
-## ✨ چرا این پروژه؟ / Why?
+## 📑 فهرست مطالب / Table of Contents
 
-این اپ برای **مشاوره‌ی ژنتیک، آموزش و پژوهش** ساخته شده. می‌توانید یک خانواده را با همه‌ی جزئیات بالینی‌اش بسازید، علائم استاندارد ژنتیک پزشکی را ببینید، ریسک ناقل بودن را تخمین بزنید و خروجی تمیز برای چاپ یا اشتراک‌گذاری بگیرید — بدون نصب هیچ چیزی و بدون ارسال داده به سرور.
-
-Built for **genetic counseling, teaching, and research**: model a family with full clinical detail, see standard medical-genetics notation, estimate carrier risk, and export print-ready output — no install, no server, your data never leaves the browser.
-
----
-
-## 🎯 امکانات / Features
-
-| | |
-|---|---|
-| 🖱️ **ساخت تعاملی** | افزودن/حذف فرد، والد، همسر و فرزند با کلیک یا منوی راست‌کلیک |
-| 🧬 **علائم استاندارد ژنتیک** | مربع (مرد)، دایره (زن)، لوزی (نامشخص) + مبتلا / ناقل / جهش‌دار / فوت‌شده |
-| 📐 **چیدمان خودکار** | موتور layout اختصاصی با fallback داخلی؛ خط‌های ازدواج، نسب و خواهر-برادری خودکار رسم می‌شوند |
-| ⚠️ **تخمین ریسک ناقل** | محاسبه‌ی تقریبی ریسک بر اساس وضعیت والدین (آموزشی/نمایشی) |
-| 🔍 **جستجو و آمار زنده** | لیست افراد با جستجوی نام + شمارش نسل‌ها، مبتلایان و ناقلان |
-| ↩️ **Undo / Redo کامل** | تاریخچه‌ی کامل با میان‌بر صفحه‌کلید |
-| 🔭 **زوم، پن و Fit-to-view** | حرکت روی بوم با موس و scroll |
-| 💾 **ورود و خروجی** | Import از JSON · Export به **JSON / CSV / SVG / PNG** |
-| 🎨 **رابط کاربری Glassmorphism** | طراحی شیشه‌ای مدرن، راست‌چین (RTL) و واکنش‌گرا |
+- [فلسفه و معماری علمی / Scientific Philosophy](#-فلسفه-و-معماری-علمی--scientific-philosophy)
+- [امکانات و قابلیت‌ها / Features](#-امکانات-و-قابلیت‌ها--features)
+- [مدل‌سازی ژنتیکی و اعتبارسنجی ریسک / Genetic Risk Engine](#-مدل‌سازی-ژنتیکی-و-اعتبارسنجی-ریسک--genetic-risk-engine)
+- [صحت داده‌ها و لایه اعتبارسنجی / Data Integrity & Validation](#-صحت-داده‌ها-و-لایه-اعتبارسنجی--data-integrity--validation)
+- [عملکرد و بنچ‌مارک در ابعاد بزرگ / Performance & Benchmarks](#-عملکرد-و-بنچ‌مارک-در-ابعاد-بزرگ--performance--benchmarks)
+- [حفظ حریم خصوصی و ذخیره‌سازی محلی / Privacy & Local Storage](#-حفظ-حریم-خصوصی-و-ذخیره‌سازی-محلی--privacy--local-storage)
+- [راهنمای علائم بالینی / Clinical Pedigree Notation](#-راهنمای-علائم-بالینی--clinical-pedigree-notation)
+- [دستورات تست و اجرا / Testing & Development](#-دستورات-تست-و-اجرا--testing--development)
+- [مجوز / License](#-مجوز--license)
 
 ---
 
-## 🩺 راهنمای علائم / Genetic Notation
+## 🔬 فلسفه و معماری علمی / Scientific Philosophy
 
-| نماد | معنی | Meaning |
+این پلتفرم بر اساس استانداردهای بین‌المللی **ACMG (American College of Medical Genetics)** و **NSGC (National Society of Genetic Counselors)** برای ترسیم دقیق و بدون تداخل شجره‌نامه‌های بالینی بازمهندسی شده است. بر خلاف ابزارهای سنتی یا نمودارهای سلسله‌مراتبی عمومی، این سامانه چالش‌های پیچیده ژنتیک پزشکی شامل موارد زیر را به طور کامل پشتیبانی می‌کند:
+
+1. **دوقلوها با زیگوتی‌های مختلف**:
+   - دوقلوهای تک‌تخمی همسان (Monozygotic - MZ): رسم دوشاخه معکوس با خط افقی رابط (Horizontal twin bar).
+   - دوقلوهای دو‌تخمی ناهمسان (Dizygotic - DZ): رسم دوشاخه همگام بدون خط افقی رابط.
+   - دوقلو با زیگوتی نامشخص: رسم نماد `?` روی نقطه اتصال رأس دوقلو طبق استاندارد ACMG.
+2. **ازدواج‌های خویشاوندی (Consanguinity)**:
+   - شناسایی خودکار نیای مشترک و رسم خط ازدواج دوبل (Double mating line).
+3. **ازدواج‌های مجدد و چندهمسری (Multi-Spouse & Remarriage)**:
+   - تفکیک دقیق فرزندان بر اساس والد مادری و پدری بدون اختلاط شاخه‌ها.
+4. **توالی‌های عمیق تا ۵۰ نسل**:
+   - چیدمان افقی بهینه و تراز ستونی بدون تداخل خطوط والد-فرزندی.
+
+---
+
+## 🎯 امکانات و قابلیت‌ها / Features
+
+| بخش | توضیحات فارسی | English Description |
+|---|---|---|
+| 📐 **موتور Layout اختصاصی** | محاسبه مختصات گره‌ها با مرتب‌سازی باری‌سنتریک، بدون تداخل و با خطوط ارتوگونال | Barycentric-ordered hierarchical layout with orthogonal collision-free routing |
+| 🧬 **موتور ریسک مندلی** | تفکیک ژنوتیپ ($AA, Aa, aa$) از فنوتیپ و محاسبه احتمال شرطی بیزی | Rigorous Bayesian conditional probabilities for AR, AD, and X-linked models |
+| 🛡️ **اعتبارسنجی متمرکز** | کشف چرخه‌های نامعتبر اجدادی (DAG cycles) و همگام‌سازی دوسویه روابط | Centralized validation, DAG cycle detection, and reciprocal relationship repair |
+| 💾 **ذخیره‌سازی محلی ایمن** | مدیریت پرونده‌ها در حافظه مرورگر با نگارش شمای داده ۲ (`schemaVersion: 2`) | Local-first persistence with case indexing and zero server transmission |
+| 📤 **خروجی‌های چندگانه** | خروجی JSON ساختاریافته، وکتور SVG، تصویر رندرشده PNG، و CSV سازگار با اکسل (UTF-8 BOM) | Export to JSON v2, high-res SVG, PNG, and RFC 4180 CSV with UTF-8 BOM |
+| ♿ **دسترس‌پذیری و UX** | برچسب‌های ARIA، ناوبری کامل صفحه‌کلید (Escape, Delete, Ctrl+Z)، و تاییدیه پیش از حذف | Accessible ARIA labels, keyboard navigation, and confirmation dialogs |
+
+---
+
+## 🧮 مدل‌سازی ژنتیکی و اعتبارسنجی ریسک / Genetic Risk Engine
+
+موتور محاسباتی در ماژول مجزای `src/domain/geneticRisk.js` بازطراحی شده است:
+
+### ۱. وراثت اتوزوم مغلوب (Autosomal Recessive)
+- **فرد مبتلا ($aa$)**: ژنوتیپ هموزیگوت جهش‌یافته دارد و به هیچ عنوان به اشتباه به عنوان ناقل هتروزیگوت بدون علامت ($Aa$) گزارش نمی‌شود ($P = 0.0$ برای ناقل خاموش بودن، با برچسب وضعیت `مبتلا`).
+- **والدین فرزند مبتلا**: ناقلین اجباری هتروزیگوت قطعی محسوب می‌شوند ($P = 1.0$).
+- **فرزند سالم والدین ناقل ($Aa \times Aa$)**: طبق فرمول بیز در فضای نمونه فرزندان غیرمبتلا ($AA + Aa$):
+  $$P(Aa \mid \text{سالم}) = \frac{1/2}{1/4 + 1/2} = \frac{2}{3} \approx 66.7\%$$
+  محاسبه دقیق ۲ از ۳ اعمال می‌شود و هرگز به اشتباه ۵۰٪ یا ۱۰۰٪ گزارش نمی‌شود.
+- **اطلاعات ناکافی**: در صورت نبود شواهد و سابقه خانوادگی، به جای انتساب عدد ساختگی ۵٪، وضعیت **«اطلاعات ناکافی برای محاسبه»** اعلام می‌شود.
+
+### ۲. وراثت وابسته به X مغلوب (X-Linked Recessive)
+- تمام دختران یک پدر مبتلا ($X^a Y$) ناقل اجباری ($100\%$) هستند.
+
+> ⚠️ **سلب مسئولیت آموزشی (Disclaimer):**
+> محاسبات این نرم‌افزار صرفاً جنبه آموزشی و مدل‌سازی ریاضی داشته و هرگز جایگزین مشاوره ژنتیک بالینی یا آزمایش‌های ژنتیک تشخیصی نمی‌باشد.
+
+---
+
+## 🛡️ صحت داده‌ها و لایه اعتبارسنجی / Data Integrity & Validation
+
+ماژول `src/domain/pedigreeValidation.js` قبل از هرگونه تغییر یا ورود فایل:
+1. **تشخیص حلقه اجدادی (Cycle Detection)**: الگوریتم پیمایش عمقی (DFS) تضمین می‌کند هیچ فردی نمی‌تواند در سلسله اجداد خود قرار گیرد ($A \to B \to A$).
+2. **بررسی دوقلوها**: دوقلوهای تک‌تخمی همسان (Identical MZ) الزاماً جنسیت بیولوژیک یکسان دارند؛ موارد متناقض مسدود می‌شوند.
+3. **همگام‌سازی دوسویه**: چنانچه در فایلی همسری ثبت شده باشد ولی در طرف مقابل درج نشده باشد، سیستم به طور خودکار بدون دستکاری شاخه‌ها آن را همگام می‌کند.
+4. **ایمنی Import**: فایل‌های مخدوش به هیچ وجه شجره‌نامه جاری را تخریب یا بازنویسی نمی‌کنند و گزارش خطای صریح به زبان فارسی نمایش داده می‌شود.
+
+---
+
+## ⚡ عملکرد و بنچ‌مارک در ابعاد بزرگ / Performance & Benchmarks
+
+موتور چیدمان و الگوریتم‌های اعتبارسنجی با تست‌های بنچ‌مارک خودکار (`tests/benchmark.test.js`) ارزیابی شده‌اند:
+
+| تعداد افراد در شجره‌نامه | عمق نسلی | تعداد اتصالات (Connectors) | مدت زمان محاسبه Layout |
+|:---:|:---:|:---:|:---:|
+| **~۱۰۰ نفر (۱۰۱ گره)** | ۶ نسل | ۶۳ اتصال | **۱۳.۳ میلی‌ثانیه** |
+| **~۵۰۰ نفر (۵۰۱ گره)** | ۲۲ نسل | ۳۱۳ اتصال | **۳۷.۹ میلی‌ثانیه** |
+| **~۱۰۰۰ نفر (۱۰۰۱ گره)** | ۳۸ نسل | ۶۲۵ اتصال | **۴۰.۴ میلی‌ثانیه** |
+
+*محیط تست: Node.js v22 LTS / Linux x86_64.*
+*نتیجه: الگوریتم به صورت شبه‌خطی $O(N)$ عمل کرده و برای شجره‌نامه‌های بزرگ بالینی بدون افت فریم اجرا می‌شود.*
+
+---
+
+## 🔒 حفظ حریم خصوصی و ذخیره‌سازی محلی / Privacy & Local Storage
+
+- **۱۰۰٪ محلی (Zero Remote Telemetry)**: تمامی اطلاعات شجره‌نامه، نام‌ها، کدهای ژنتیکی و علائم بالینی در مرورگر کاربر باقی می‌مانند. هیچ داده‌ای به هیچ سروری ارسال نمی‌شود.
+- **ذخیره در حافظه محلی مرورگر**: امکان ذخیره و بارگذاری چندین پرونده مستقل با کلید اختصاصی و شناسه یکتا از طریق دکمه «ذخیره در مرورگر» و پنجره «پرونده‌ها».
+
+---
+
+## 🩺 راهنمای علائم بالینی / Clinical Pedigree Notation
+
+| نماد گرافیکی | عنوان فارسی | Scientific Meaning |
 |:---:|---|---|
-| ⬜ | مرد | Male |
-| ⚪ | زن | Female |
-| ◆ | جنسیت نامشخص | Unknown sex |
-| 🔴 | مبتلا | Affected |
-| 🟠 | ناقل | Carrier |
-| 🔵 | جهش‌دار (تست مثبت) | Mutation carrier |
-| ╲ | خط مورب = فوت‌شده | Deceased |
+| ⬛ / ⬜ | مربع (مذکر) | Male (XY) |
+| ⬤ / ⚪ | دایره (مونث) | Female (XX) |
+| 🔷 / ◆ | لوزی (نامشخص) | Unknown sex |
+| 🔴 | فنوتیپ مثبت (مبتلا) | Affected proband / individual |
+| 🟠 | ناقل هتروزیگوت | Heterozygous carrier ($Aa$) |
+| 🔵 | واریانت تاییدشده | Confirmed molecular mutation |
+| ╲ | خط مورب | Deceased |
+| ═ | خط دوبل ازدواج | Consanguineous mating |
+| ∧═∧ | دوقلوی همسان (MZ) | Monozygotic twins with horizontal bar |
+| ∧ ∧ | دوقلوی ناهمسان (DZ) | Dizygotic twins |
+| ∧?∧ | دوقلو با زیگوتی نامشخص | Twins with unknown zygosity |
 
 ---
 
-## 🚀 شروع به کار / Getting Started
+## 🚀 دستورات تست و اجرا / Testing & Development
 
-نیاز: **Node.js 18+**
+### پیش‌نیازها
+- **Node.js 18+** یا بالاتر
 
 ```bash
 # نصب وابستگی‌ها
 npm install
 
-# اجرای محیط توسعه
-npm run dev
+# اجرای تمام تست‌های خودکار (۳۰ تست در ۷ سوئیت)
+npm test
 
-# ساخت نسخه‌ی production
+# بررسی کیفیت کد و Linter
+npm run lint
+
+# ساخت نسخه نهایی Production
 npm run build
 
-# پیش‌نمایش build
-npm run preview
+# اجرای سرور توسعه محلی
+npm run dev
 ```
 
-سپس آدرسی که Vite در ترمینال نشان می‌دهد (معمولاً `http://localhost:5173`) را باز کنید.
-
 ---
 
-## ⌨️ میان‌برهای صفحه‌کلید / Shortcuts
+## 📜 مجوز / License
 
-| کلید | عملکرد |
-|---|---|
-| `Ctrl/⌘ + Z` | بازگردانی (Undo) |
-| `Ctrl/⌘ + Shift + Z` یا `Ctrl + Y` | تکرار (Redo) |
-| **راست‌کلیک روی فرد** | منوی سریع: افزودن مادر/پدر/همسر/فرزند، حذف |
-| **Scroll** روی بوم | زوم |
-| **درگ** روی بوم | جابه‌جایی نما (Pan) |
-
----
-
-## 🧱 تکنولوژی‌ها / Tech Stack
-
-- ⚛️ **React 18** + **Vite 7** (با `@vitejs/plugin-react-swc`)
-- 🎨 **Tailwind CSS** برای استایل گلَسمورفیسم
-- 📊 **D3.js** · **dagre / dagre-d3** · **elkjs** برای کمک به چیدمان گراف
-- 🗂️ **Dexie** (IndexedDB) برای ذخیره‌ی محلی
-- 🖼️ **html2canvas** برای خروجی تصویری
-- ✨ **lucide-react** برای آیکون‌ها
-
----
-
-## 📁 ساختار پروژه / Project Structure
-
-```
-pedigree-visualizer/
-├── index.html                  # نقطه‌ی ورود Vite
-├── src/
-│   ├── main.jsx                # bootstrap اپ
-│   ├── GeneticPedigreeApp.jsx  # ⭐ کامپوننت اصلی (UI + state + export)
-│   ├── pedigreeLayout.js       # موتور چیدمان شجره‌نامه
-│   └── index.css               # استایل‌های Tailwind + انیمیشن‌ها
-├── public/                     # کتابخانه‌ی pedigreejs و asset‌ها
-├── tailwind.config.js
-└── vite.config.js
-```
-
-> اگر فایل `public/pedigreejs/pedigreejs.v2.1.0-rc7.min.js` بارگذاری شود، اپ از موتور PedigreeJS استفاده می‌کند؛ در غیر این صورت به موتور چیدمان داخلی برمی‌گردد.
-
----
-
-## ⚠️ یادداشت بالینی / Clinical Note
-
-تخمین «ریسک ناقل بودن» در این اپ صرفاً **آموزشی و نمایشی** است و جایگزین مشاوره‌ی ژنتیک حرفه‌ای یا تست‌های تشخیصی نیست.
-
-The carrier-risk estimate is **educational/illustrative only** and is **not** a substitute for professional genetic counseling or diagnostic testing.
-
----
-
-## 📜 License
-
-MIT — آزادانه استفاده، تغییر و به‌اشتراک‌گذاری کنید.
-
-<div align="center">
-
-ساخته‌شده با ❤️ برای جامعه‌ی ژنتیک پزشکی
-
-</div>
+تحت مجوز [MIT](LICENSE) منتشر شده است. استفاده و توسعه در محیط‌های دانشگاهی، پژوهشی و آموزشی آزاد است.

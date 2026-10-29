@@ -1,25 +1,30 @@
 import React, { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { computePedigreeLayout } from "./pedigreeLayout.js";
 import {
+  calculateGeneticRisk,
+  INHERITANCE_MODELS,
+  RISK_STATUS,
+  CLINICAL_DISCLAIMER_FA,
+} from "./domain/geneticRisk.js";
+import {
+  validatePedigreeData,
+  sanitizeAndRepairPedigree,
+  CURRENT_SCHEMA_VERSION,
+} from "./domain/pedigreeValidation.js";
+import {
+  saveCaseLocally,
+  loadCaseLocally,
+  listSavedCases,
+  deleteCaseLocally,
+} from "./services/storageService.js";
+import {
   GitFork, UserPlus, Upload, Download, Undo2, Redo2, Trash2, Search,
   Plus, Minus, Maximize2, RotateCcw, Users, ChevronDown, Crosshair,
-  Layers, Dna, Activity, FileText, CheckCircle2,
+  Layers, Dna, Activity, FileText, CheckCircle2, Bookmark, AlertTriangle, X
 } from "lucide-react";
 
 const uid = (p = "p") => `${p}_${Math.random().toString(36).slice(2, 9)}`;
 const clone = (x) => JSON.parse(JSON.stringify(x));
-
-// ---- Clinical Risk Calculation (Mendelian Genetics Engine) ----
-function calcCarrierRisk(person, data) {
-  const mother = person.motherId ? data.people[person.motherId] : undefined;
-  const father = person.fatherId ? data.people[person.fatherId] : undefined;
-  if (person.carrier) return { risk: 1.0, reason: "فرد دارای وضعیت ناقل قطعی است (Heterozygous Carrier)" };
-  if (person.affected) return { risk: 1.0, reason: "فرد دارای فنوتیپ بالینی مثبت است (Affected)" };
-  if (mother?.carrier && father?.carrier) return { risk: 0.667, reason: "هر دو والد ناقل هتروزیگوت هستند (احتمال ۲/۳ در فرزند سالم)" };
-  if (mother?.affected || father?.affected) return { risk: 0.5, reason: "یکی از والدین مبتلا به بیماری است (احتمال ۵۰٪)" };
-  if (mother?.carrier || father?.carrier) return { risk: 0.25, reason: "یکی از والدین ناقل هتروزیگوت است (احتمال ۲۵٪)" };
-  return { risk: 0.05, reason: "ریسک زمینه عمومی در جمعیت (Baseline Risk)" };
-}
 
 // ---- Presets & Sample Builders ----
 function buildSample() {
@@ -37,7 +42,11 @@ function buildSample() {
   a.childIds.push(c.id); b.childIds.push(c.id);
   d.childIds.push(e.id, f.id, g.id); c.childIds.push(e.id, f.id, g.id);
 
-  return { people: { [a.id]: a, [b.id]: b, [c.id]: c, [d.id]: d, [e.id]: e, [f.id]: f, [g.id]: g } };
+  return {
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    metadata: { caseRef: 'GEN-8420', caseTitle: 'خانواده استاندارد بالینی', createdAt: new Date().toISOString() },
+    people: { [a.id]: a, [b.id]: b, [c.id]: c, [d.id]: d, [e.id]: e, [f.id]: f, [g.id]: g },
+  };
 }
 
 // Preset: 20-generation clinical pedigree with 5 children, multi-spouses, consanguinity, and twins
@@ -147,7 +156,6 @@ function build20GenPedigree() {
       };
       people[husbandId].spouseIds.push(secSpouseId);
 
-      // Child from second marriage
       const secChildId = `p${g}_sec_c1`;
       people[secChildId] = {
         id: secChildId,
@@ -169,7 +177,11 @@ function build20GenPedigree() {
     };
   }
 
-  return { people };
+  return {
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    metadata: { caseRef: 'GEN-20GEN', caseTitle: 'شجره‌نامه ۲۰ نسلی ۵ فرزندی', createdAt: new Date().toISOString() },
+    people,
+  };
 }
 
 // Preset: 5 children per family branching tree
@@ -222,7 +234,11 @@ function build5ChildTree(depth = 2) {
     currentCouples = nextCouples;
   }
 
-  return { people };
+  return {
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    metadata: { caseRef: 'GEN-5TREE', caseTitle: 'الگوی ۵ فرزند در هر خانواده', createdAt: new Date().toISOString() },
+    people,
+  };
 }
 
 // Preset: 50 generations deep
@@ -278,7 +294,11 @@ function buildLargeSample(genCount = 50) {
     prevFather = isMale ? childId : spouseId;
     prevMother = isMale ? spouseId : childId;
   }
-  return { people };
+  return {
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    metadata: { caseRef: 'GEN-50GEN', caseTitle: 'شجره‌نامه طولی ۵۰ نسلی', createdAt: new Date().toISOString() },
+    people,
+  };
 }
 
 // ---- Reducer & State Management ----
@@ -286,6 +306,9 @@ function reducer(history, action) {
   const apply = (s, a) => {
     const data = clone(s.data);
     switch (a.type) {
+      case "SET_MODEL": {
+        return { ...s, inheritanceModel: a.model };
+      }
       case "ADD_PERSON": {
         const id = uid();
         data.people[id] = { id, name: "کیس جدید", sex: "unknown", spouseIds: [], childIds: [], twinType: "none", adopted: false, ...(a.person || {}) };
@@ -297,7 +320,6 @@ function reducer(history, action) {
           const oldTg = p.twinGroupId;
           data.people[a.id] = { ...p, ...a.patch };
 
-          // If twinType was changed to none, detach from twin group
           if (a.patch.twinType === 'none' && oldTg) {
             data.people[a.id].twinGroupId = null;
             const rem = Object.values(data.people).filter((x) => x.twinGroupId === oldTg && x.id !== a.id);
@@ -306,7 +328,6 @@ function reducer(history, action) {
               rem[0].twinType = 'none';
             }
           } else if (a.patch.twinType && a.patch.twinType !== 'none' && (p.twinGroupId || oldTg)) {
-            // Sync zygosity across all siblings in this twin group
             const tg = p.twinGroupId || oldTg;
             Object.values(data.people).forEach((o) => {
               if (o.twinGroupId === tg && o.id !== a.id) {
@@ -466,7 +487,7 @@ function reducer(history, action) {
     if (!future.length) return history;
     return { past: [...past, present], present: future[0], future: future.slice(1) };
   }
-  if (["SELECT", "ZOOM", "PAN", "RESET", "SET_VIEW"].includes(action.type)) {
+  if (["SELECT", "ZOOM", "PAN", "RESET", "SET_VIEW", "SET_MODEL"].includes(action.type)) {
     return { past, present: apply(present, action), future };
   }
   const newPresent = apply(present, action);
@@ -505,7 +526,7 @@ function MiniGlyph({ person, size = 18 }) {
   const stroke = person.deceased ? '#94a3b8' : '#334155';
   const shape = person.sex === 'male' ? 'sq' : person.sex === 'female' ? 'ci' : 'di';
   return (
-    <svg width={size} height={size} viewBox="-14 -14 28 28" className="shrink-0">
+    <svg width={size} height={size} viewBox="-14 -14 28 28" className="shrink-0" aria-hidden="true">
       {shape === 'sq' && <rect x={-10} y={-10} width={20} height={20} rx={2} fill={fill} stroke={stroke} strokeWidth={2} />}
       {shape === 'ci' && <circle r={10} fill={fill} stroke={stroke} strokeWidth={2} />}
       {shape === 'di' && <polygon points="-10,0 0,-10 10,0 0,10" fill={fill} stroke={stroke} strokeWidth={2} />}
@@ -551,17 +572,19 @@ function FamilyConnectors({ connectors }) {
   );
 }
 
-function PersonNode({ person, pos, selected, risk, onSelect, onContextMenu }) {
+function PersonNode({ person, pos, selected, riskAssessment, onSelect, onContextMenu }) {
+  const isHighRisk = riskAssessment && (riskAssessment.status === RISK_STATUS.AFFECTED || riskAssessment.status === RISK_STATUS.OBLIGATE_CARRIER || (riskAssessment.probability && riskAssessment.probability >= 0.5));
+
   return (
-    <g transform={`translate(${pos.x},${pos.y})`} data-node onClick={onSelect} onContextMenu={onContextMenu} className="cursor-pointer">
+    <g transform={`translate(${pos.x},${pos.y})`} data-node onClick={onSelect} onContextMenu={onContextMenu} className="cursor-pointer focus:outline-hidden" tabIndex={0} role="button" aria-label={`پرونده ${person.name || person.id}`}>
       {selected && <circle r={38} fill="none" stroke="#2563eb" strokeWidth={2.5} strokeDasharray="4 3" />}
       <PersonGlyph person={person} />
       <text y={40} textAnchor="middle" className="select-none fill-slate-800 text-[11px] font-semibold tracking-tight">{person.name}</text>
       {person.deceased && <line x1={-26} y1={-26} x2={26} y2={26} stroke={LINE.mating} strokeWidth={2} />}
-      {risk > 0.5 && (
+      {isHighRisk && !person.affected && (
         <g transform="translate(26,-26)">
-          <circle r={8.5} fill="#fee2e2" stroke="#e11d48" strokeWidth={1.5} />
-          <path d="M0 -3.5 L0 0.5 M0 2.5 L0 3.5" stroke="#e11d48" strokeWidth={1.6} strokeLinecap="round" />
+          <circle r={8.5} fill="#fef3c7" stroke="#d97706" strokeWidth={1.5} />
+          <path d="M0 -3.5 L0 0.5 M0 2.5 L0 3.5" stroke="#d97706" strokeWidth={1.6} strokeLinecap="round" />
         </g>
       )}
     </g>
@@ -596,7 +619,7 @@ function ClinicalLegend() {
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-slate-700">
       {items.map((it, i) => (
         <span key={i} className="inline-flex items-center gap-1.5">
-          <svg width="14" height="14" viewBox="-8 -8 16 16">{renderItem(it)}</svg>
+          <svg width="14" height="14" viewBox="-8 -8 16 16" aria-hidden="true">{renderItem(it)}</svg>
           <span className="font-medium">{it.label}</span>
         </span>
       ))}
@@ -605,26 +628,26 @@ function ClinicalLegend() {
 }
 
 // ---- Scientific UI Button & Input Primitives ----
-function LabBtn({ children, onClick, variant = 'default', className = '', title, disabled }) {
+function LabBtn({ children, onClick, variant = 'default', className = '', title, disabled, ariaLabel }) {
   const styles = {
-    primary: "bg-blue-600 hover:bg-blue-700 text-white border-blue-600 shadow-sm",
-    danger: "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100",
-    default: "bg-white text-slate-700 border-slate-300 hover:bg-slate-50 shadow-sm",
-    telemetry: "bg-slate-900 text-white border-slate-800 hover:bg-slate-800",
+    primary: "bg-blue-600 hover:bg-blue-700 text-white border-blue-600 shadow-sm focus-visible:ring-2 focus-visible:ring-blue-500",
+    danger: "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 focus-visible:ring-2 focus-visible:ring-rose-500",
+    default: "bg-white text-slate-700 border-slate-300 hover:bg-slate-50 shadow-sm focus-visible:ring-2 focus-visible:ring-slate-400",
+    success: "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 focus-visible:ring-2 focus-visible:ring-emerald-500",
   }[variant] || "bg-white text-slate-700 border-slate-300 hover:bg-slate-50";
 
   return (
-    <button title={title} disabled={disabled} onClick={onClick}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${styles} ${className}`}>
+    <button title={title} aria-label={ariaLabel || title} disabled={disabled} onClick={onClick}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-40 outline-hidden ${styles} ${className}`}>
       {children}
     </button>
   );
 }
 
-function LabIconBtn({ children, onClick, title, disabled, className = '' }) {
+function LabIconBtn({ children, onClick, title, disabled, className = '', ariaLabel }) {
   return (
-    <button title={title} disabled={disabled} onClick={onClick}
-      className={`grid h-8 w-8 place-items-center rounded-lg border border-slate-300 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 ${className}`}>
+    <button title={title} aria-label={ariaLabel || title} disabled={disabled} onClick={onClick}
+      className={`grid h-8 w-8 place-items-center rounded-lg border border-slate-300 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-40 outline-hidden ${className}`}>
       {children}
     </button>
   );
@@ -655,7 +678,7 @@ function Segmented({ value, onChange, options }) {
     <div className="flex gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1">
       {options.map((o) => (
         <button key={o.value} type="button" onClick={() => onChange(o.value)}
-          className={`flex-1 rounded-md py-1.5 text-xs font-medium transition ${value === o.value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
+          className={`flex-1 rounded-md py-1.5 text-xs font-medium transition outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 ${value === o.value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
           {o.label}
         </button>
       ))}
@@ -666,7 +689,7 @@ function Segmented({ value, onChange, options }) {
 function LabToggle({ checked, onChange, label }) {
   return (
     <button type="button" onClick={() => onChange(!checked)}
-      className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium transition hover:bg-slate-50">
+      className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium transition hover:bg-slate-50 outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500">
       <span className="text-slate-700">{label}</span>
       <span className={`relative inline-block h-4 w-8 rounded-full transition ${checked ? 'bg-blue-600' : 'bg-slate-200'}`}>
         <span className="absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all" style={{ left: checked ? 18 : 2 }} />
@@ -677,7 +700,13 @@ function LabToggle({ checked, onChange, label }) {
 
 // ---------------- Main Clinical Genetics Pedigree Application ----------------
 export default function GeneticPedigreeApp() {
-  const initial = { data: buildSample(), selectedId: null, zoom: 1, offset: { x: 80, y: 80 } };
+  const initial = {
+    data: buildSample(),
+    selectedId: null,
+    inheritanceModel: INHERITANCE_MODELS.AUTOSOMAL_RECESSIVE,
+    zoom: 1,
+    offset: { x: 80, y: 80 },
+  };
   const { history, dispatch } = useHistory(initial);
   const state = history.present;
   const canUndo = history.past.length > 0;
@@ -687,7 +716,11 @@ export default function GeneticPedigreeApp() {
   const [query, setQuery] = useState('');
   const [exportOpen, setExportOpen] = useState(false);
   const [presetsOpen, setPresetsOpen] = useState(false);
+  const [storageOpen, setStorageOpen] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+  const [savedCases, setSavedCases] = useState([]);
   const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
 
   const svgRef = useRef(null);
   const wrapRef = useRef(null);
@@ -698,8 +731,8 @@ export default function GeneticPedigreeApp() {
   const layout = useMemo(() => {
     return computePedigreeLayout(state.data);
   }, [state.data]);
-  const nodes = layout.nodes;
 
+  const nodes = layout.nodes;
   const selected = state.selectedId ? state.data.people[state.selectedId] : null;
   const people = Object.values(state.data.people);
   const filtered = people.filter((p) => !query || String(p.name || '').toLowerCase().includes(query.toLowerCase()));
@@ -715,6 +748,12 @@ export default function GeneticPedigreeApp() {
       generations: maxGen,
     };
   }, [people, layout]);
+
+  // Evaluated risk for selected person
+  const selectedRisk = useMemo(() => {
+    if (!selected) return null;
+    return calculateGeneticRisk(selected, state.data, state.inheritanceModel);
+  }, [selected, state.data, state.inheritanceModel]);
 
   // Pan & Zoom controls
   const onMouseDown = (e) => {
@@ -774,6 +813,44 @@ export default function GeneticPedigreeApp() {
     });
   };
 
+  // Local Persistence Operations
+  const handleSaveLocal = () => {
+    const caseId = state.data.metadata?.caseRef || `CASE-${Date.now().toString(36).toUpperCase()}`;
+    const title = state.data.metadata?.caseTitle || `پرونده شجره‌نامه (${people.length} نفر)`;
+    const res = saveCaseLocally(caseId, state.data, title);
+    if (res.success) {
+      setSuccessMsg(`پرونده "${title}" با موفقیت در حافظه مرورگر ذخیره شد.`);
+      setSavedCases(listSavedCases());
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } else {
+      setErrorMsg(res.error || 'خطا در ذخیره‌سازی محلی.');
+      setTimeout(() => setErrorMsg(''), 4000);
+    }
+  };
+
+  const handleOpenStorageModal = () => {
+    setSavedCases(listSavedCases());
+    setStorageOpen(true);
+  };
+
+  const handleLoadCase = (id) => {
+    const res = loadCaseLocally(id);
+    if (res.success && res.data) {
+      dispatch({ type: 'LOAD', data: res.data });
+      setStorageOpen(false);
+      setSuccessMsg('پرونده با موفقیت بازخوانی شد.');
+      setTimeout(() => setSuccessMsg(''), 3000);
+      setTimeout(fitView, 50);
+    } else {
+      setErrorMsg(res.error || 'خطا در بارگذاری پرونده.');
+    }
+  };
+
+  const handleDeleteCase = (id) => {
+    deleteCaseLocally(id);
+    setSavedCases(listSavedCases());
+  };
+
   // Clinical Exports
   const downloadBlob = (blob, name) => {
     const url = URL.createObjectURL(blob);
@@ -783,7 +860,20 @@ export default function GeneticPedigreeApp() {
     a.click();
     URL.revokeObjectURL(url);
   };
-  const exportJSON = () => downloadBlob(new Blob([JSON.stringify(state.data, null, 2)], { type: "application/json" }), "pedigree_case_clinical.json");
+
+  const exportJSON = () => {
+    const payload = {
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      metadata: {
+        ...(state.data.metadata || {}),
+        exportedAt: new Date().toISOString(),
+        inheritanceModel: state.inheritanceModel,
+      },
+      people: state.data.people,
+    };
+    downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }), "pedigree_case_clinical.json");
+  };
+
   const exportCSV = () => {
     const rows = [
       ["SAMPLE_ID", "CASE_NAME", "SEX", "AFFECTED", "CARRIER", "DECEASED", "MUTATION", "ONSET_AGE", "DEATH_AGE", "ZYGOSITY", "MOTHER_ID", "FATHER_ID", "SPOUSES", "CHILDREN"],
@@ -794,14 +884,16 @@ export default function GeneticPedigreeApp() {
       ]),
     ];
     const csv = rows.map((r) => r.map((v) => `"${String(v).replaceAll('"', '""')}"`).join(",")).join("\n");
-    downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), "pedigree_clinical_report.csv");
+    downloadBlob(new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" }), "pedigree_clinical_report.csv");
   };
+
   const exportSVG = () => {
     if (!svgRef.current) return;
     const svg = svgRef.current.cloneNode(true);
     svg.querySelectorAll('[data-ui]').forEach((n) => n.parentElement?.removeChild(n));
     downloadBlob(new Blob([new XMLSerializer().serializeToString(svg)], { type: "image/svg+xml" }), "pedigree_clinical.svg");
   };
+
   const exportPNG = () => {
     if (!svgRef.current) return;
     const svg = svgRef.current.cloneNode(true);
@@ -824,18 +916,34 @@ export default function GeneticPedigreeApp() {
     img.src = url;
   };
 
+  // Safe Centralized Import Validation
   const importJSON = (e) => {
     const file = e.target.files?.[0]; if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const data = JSON.parse(String(reader.result));
-        if (!data || !data.people) throw new Error('invalid');
-        dispatch({ type: 'LOAD', data });
+        const raw = JSON.parse(String(reader.result));
+        const validation = validatePedigreeData(raw);
+
+        if (!validation.isValid) {
+          setErrorMsg(`فایل نامعتبر است: ${validation.errors.join(' | ')}`);
+          setTimeout(() => setErrorMsg(''), 6000);
+          return;
+        }
+
+        const { sanitizedData, repairLog } = sanitizeAndRepairPedigree(raw);
+        dispatch({ type: 'LOAD', data: sanitizedData });
         didFit.current = false;
         setTimeout(fitView, 50);
+
+        if (repairLog.length > 0) {
+          setSuccessMsg(`فایل بارگذاری شد (${repairLog.length} تصحیح خودکار روابط انجام شد).`);
+        } else {
+          setSuccessMsg('فایل شجره‌نامه با موفقیت بارگذاری شد.');
+        }
+        setTimeout(() => setSuccessMsg(''), 4000);
       } catch {
-        setErrorMsg('فایل داده‌های شجره‌نامه نامعتبر است.');
+        setErrorMsg('ساختار فایل JSON معتبر نیست.');
         setTimeout(() => setErrorMsg(''), 4000);
       }
     };
@@ -848,23 +956,119 @@ export default function GeneticPedigreeApp() {
     fitView();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Keyboard navigation & accessibility
   useEffect(() => {
     const onKey = (e) => {
       const tag = (e.target?.tagName || '').toLowerCase();
       if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); dispatch({ type: e.shiftKey ? 'REDO' : 'UNDO' }); }
-      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); dispatch({ type: 'REDO' }); }
+
+      if (e.key === 'Escape') {
+        setMenu({ x: 0, y: 0, id: null });
+        setPresetsOpen(false);
+        setExportOpen(false);
+        setStorageOpen(false);
+        setDeleteConfirmId(null);
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedId) {
+        e.preventDefault();
+        setDeleteConfirmId(state.selectedId);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        dispatch({ type: e.shiftKey ? 'REDO' : 'UNDO' });
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        dispatch({ type: 'REDO' });
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [state.selectedId, dispatch]);
 
   return (
     <div dir="rtl" className="flex h-screen w-full flex-col bg-slate-100 text-slate-800">
       {/* Alert toast */}
       {errorMsg && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 rounded-lg border border-rose-300 bg-rose-600 px-4 py-2 text-xs font-semibold text-white shadow-xl">
-          {errorMsg}
+        <div role="alert" className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg border border-rose-300 bg-rose-600 px-4 py-2 text-xs font-semibold text-white shadow-xl">
+          <AlertTriangle size={16} />
+          <span>{errorMsg}</span>
+          <button onClick={() => setErrorMsg('')} className="mr-2 rounded p-0.5 hover:bg-rose-700"><X size={14} /></button>
+        </div>
+      )}
+
+      {/* Success toast */}
+      {successMsg && (
+        <div role="status" className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow-xl">
+          <CheckCircle2 size={16} />
+          <span>{successMsg}</span>
+          <button onClick={() => setSuccessMsg('')} className="mr-2 rounded p-0.5 hover:bg-emerald-700"><X size={14} /></button>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
+          <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-5 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="grid h-10 w-10 place-items-center rounded-lg bg-rose-50 border border-rose-200">
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">تایید حذف پرونده فرد</h3>
+                <p className="text-xs text-slate-500">آیا از حذف این فرد اطمینان دارید؟</p>
+              </div>
+            </div>
+            <p className="text-xs leading-relaxed text-slate-600 bg-slate-50 p-3 rounded-lg border border-slate-200">
+              با حذف این فرد، تمام اتصالات والدینی، همسری و فرزندی وابسته به وی قطع خواهد شد. این عملیات با کلید Undo قابل بازگشت است.
+            </p>
+            <div className="flex justify-end gap-2 pt-1">
+              <LabBtn onClick={() => setDeleteConfirmId(null)}>انصراف</LabBtn>
+              <LabBtn variant="danger" onClick={() => {
+                dispatch({ type: 'DELETE', id: deleteConfirmId });
+                setDeleteConfirmId(null);
+              }}>
+                حذف فرد
+              </LabBtn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Saved Cases Modal */}
+      {storageOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
+          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <Bookmark size={18} className="text-blue-600" />
+                <h3 className="text-sm font-bold text-slate-900">پرونده‌های ذخیره‌شده محلی (Local Cases)</h3>
+              </div>
+              <button onClick={() => setStorageOpen(false)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"><X size={16} /></button>
+            </div>
+            <div className="max-h-72 overflow-y-auto space-y-2">
+              {savedCases.length === 0 ? (
+                <div className="py-8 text-center text-xs text-slate-400">هیچ پرونده‌ای در حافظه مرورگر ذخیره نشده است.</div>
+              ) : (
+                savedCases.map((c) => (
+                  <div key={c.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 p-3 hover:bg-slate-50 transition">
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-slate-800 truncate">{c.title || c.id}</div>
+                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                        {c.personCount} عضو · بروزرسانی: {new Date(c.updatedAt).toLocaleDateString('fa-IR')}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <LabBtn onClick={() => handleLoadCase(c.id)}>بازخوانی</LabBtn>
+                      <LabIconBtn title="حذف" onClick={() => handleDeleteCase(c.id)} className="text-rose-600 border-rose-200 hover:bg-rose-50">
+                        <Trash2 size={12} />
+                      </LabIconBtn>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="flex justify-end pt-2 border-t border-slate-100">
+              <LabBtn onClick={() => setStorageOpen(false)}>بستن پنجره</LabBtn>
+            </div>
+          </div>
         </div>
       )}
 
@@ -888,6 +1092,21 @@ export default function GeneticPedigreeApp() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Inheritance Model Selector */}
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1">
+            <span className="text-[10px] font-bold text-slate-500">الگوی وراثت:</span>
+            <select
+              value={state.inheritanceModel}
+              onChange={(e) => dispatch({ type: 'SET_MODEL', model: e.target.value })}
+              className="bg-transparent text-xs font-semibold text-blue-700 outline-hidden cursor-pointer">
+              <option value={INHERITANCE_MODELS.AUTOSOMAL_RECESSIVE}>اتوزوم مغلوب (AR)</option>
+              <option value={INHERITANCE_MODELS.AUTOSOMAL_DOMINANT}>اتوزوم غالب (AD)</option>
+              <option value={INHERITANCE_MODELS.X_LINKED_RECESSIVE}>وابسته به X مغلوب (XR)</option>
+            </select>
+          </div>
+
+          <div className="h-4 w-px bg-slate-200" />
+
           <LabBtn variant="primary" onClick={() => dispatch({ type: 'ADD_PERSON' })}>
             <UserPlus size={14} /> ثبت فرد جدید
           </LabBtn>
@@ -940,6 +1159,17 @@ export default function GeneticPedigreeApp() {
           <LabIconBtn title="تکرار (Ctrl+Shift+Z)" disabled={!canRedo} onClick={() => dispatch({ type: 'REDO' })}><Redo2 size={14} /></LabIconBtn>
 
           <div className="h-4 w-px bg-slate-200" />
+
+          {/* Local Persistence Buttons */}
+          <LabBtn onClick={handleSaveLocal} title="ذخیره شجره‌نامه در حافظه مرورگر">
+            <Bookmark size={14} /> ذخیره در مرورگر
+          </LabBtn>
+          <LabBtn onClick={handleOpenStorageModal} title="مشاهده پرونده‌های ذخیره‌شده">
+            <FileText size={14} /> پرونده‌ها
+          </LabBtn>
+
+          <div className="h-4 w-px bg-slate-200" />
+
           <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 transition">
             <Upload size={14} /> ورود داده
             <input type="file" accept="application/json" className="hidden" onChange={importJSON} />
@@ -953,7 +1183,7 @@ export default function GeneticPedigreeApp() {
               <div className="absolute left-0 top-full z-40 mt-1 w-44 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
                 {[
                   ['فرمت داده JSON', exportJSON],
-                  ['جدول اطلاعاتی CSV', exportCSV],
+                  ['جدول اطلاعاتی CSV (اکسل)', exportCSV],
                   ['وکتور کیفیت بالا SVG', exportSVG],
                   ['تصویر رندرشده PNG', exportPNG],
                 ].map(([label, fn]) => (
@@ -1054,7 +1284,6 @@ export default function GeneticPedigreeApp() {
               onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
               onWheel={onWheel} onContextMenu={(e) => openMenu(e, null)}>
               <defs>
-                {/* Millimeter engineering grid */}
                 <pattern id="smallGrid" width="20" height="20" patternUnits="userSpaceOnUse">
                   <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e2e8f0" strokeWidth="0.8" />
                 </pattern>
@@ -1086,9 +1315,9 @@ export default function GeneticPedigreeApp() {
 
                 {people.map((p) => {
                   const pos = nodes[p.id]; if (!pos) return null;
-                  const { risk } = calcCarrierRisk(p, state.data);
+                  const riskAssessment = calculateGeneticRisk(p, state.data, state.inheritanceModel);
                   return (
-                    <PersonNode key={p.id} person={p} pos={pos} risk={risk}
+                    <PersonNode key={p.id} person={p} pos={pos} riskAssessment={riskAssessment}
                       selected={state.selectedId === p.id}
                       onSelect={() => dispatch({ type: 'SELECT', id: p.id })}
                       onContextMenu={(e) => openMenu(e, p.id)} />
@@ -1113,7 +1342,7 @@ export default function GeneticPedigreeApp() {
                   <button className="flex w-full items-center justify-between rounded px-2 py-1.5 text-right hover:bg-slate-50" onClick={() => { addRelative('spouse', menu.id); setMenu({ x: 0, y: 0, id: null }); }}>افزودن همسر <Plus size={12} className="text-slate-400" /></button>
                   <button className="flex w-full items-center justify-between rounded px-2 py-1.5 text-right hover:bg-slate-50" onClick={() => { addRelative('child', menu.id); setMenu({ x: 0, y: 0, id: null }); }}>افزودن فرزند <Plus size={12} className="text-slate-400" /></button>
                   <div className="my-1 border-t border-slate-100" />
-                  <button className="flex w-full items-center justify-between rounded px-2 py-1.5 text-right text-rose-600 hover:bg-rose-50" onClick={() => { dispatch({ type: 'DELETE', id: menu.id }); setMenu({ x: 0, y: 0, id: null }); }}>حذف این پرونده <Trash2 size={12} /></button>
+                  <button className="flex w-full items-center justify-between rounded px-2 py-1.5 text-right text-rose-600 hover:bg-rose-50" onClick={() => { setDeleteConfirmId(menu.id); setMenu({ x: 0, y: 0, id: null }); }}>حذف این پرونده <Trash2 size={12} /></button>
                 </div>
               </div>
             )}
@@ -1134,7 +1363,7 @@ export default function GeneticPedigreeApp() {
                       <div className="text-[10px] font-mono text-slate-400">ID: {selected.id}</div>
                     </div>
                   </div>
-                  <LabIconBtn title="حذف پرونده" className="text-rose-600 hover:bg-rose-50 border-rose-200" onClick={() => dispatch({ type: 'DELETE', id: selected.id })}>
+                  <LabIconBtn title="حذف پرونده" className="text-rose-600 hover:bg-rose-50 border-rose-200" onClick={() => setDeleteConfirmId(selected.id)}>
                     <Trash2 size={14} />
                   </LabIconBtn>
                 </div>
@@ -1226,23 +1455,56 @@ export default function GeneticPedigreeApp() {
                   })()}
                 </div>
 
-                {/* Mendelian Risk Engine */}
-                {(() => {
-                  const { risk, reason } = calcCarrierRisk(selected, state.data);
-                  const pct = Math.round(risk * 100);
-                  return (
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-[11px] font-bold text-slate-700">ارزیابی ریسک مندلی</span>
-                        <span className="font-mono text-xs font-bold text-blue-700">{pct}%</span>
+                {/* Upgraded Mendelian Educational Risk Panel */}
+                {selectedRisk && (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
+                    <div className="flex items-center justify-between border-b border-slate-200/60 pb-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <Dna size={14} className="text-blue-600" />
+                        <span className="text-[11px] font-bold text-slate-700">ارزیابی ژنتیک مندلی (آموزشی)</span>
                       </div>
-                      <div className="h-1.5 w-full rounded-full bg-slate-200 overflow-hidden">
-                        <div className={`h-full transition-all ${pct >= 50 ? 'bg-rose-500' : pct >= 25 ? 'bg-amber-500' : 'bg-blue-600'}`} style={{ width: `${pct}%` }} />
-                      </div>
-                      <p className="mt-2 text-[10px] leading-relaxed text-slate-500">{reason}</p>
+                      <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[9px] font-mono font-bold text-blue-800">
+                        {selectedRisk.model === INHERITANCE_MODELS.AUTOSOMAL_RECESSIVE ? 'اتوزوم مغلوب' : selectedRisk.model === INHERITANCE_MODELS.AUTOSOMAL_DOMINANT ? 'اتوزوم غالب' : 'وابسته به X'}
+                      </span>
                     </div>
-                  );
-                })()}
+
+                    <div className="flex items-center justify-between bg-white rounded-md p-2 border border-slate-200/80">
+                      <span className="text-[11px] font-medium text-slate-600">برآورد احتمال ناقل بودن:</span>
+                      <span className={`text-xs font-bold font-mono ${
+                        selectedRisk.status === RISK_STATUS.AFFECTED
+                          ? 'text-rose-600'
+                          : selectedRisk.status === RISK_STATUS.OBLIGATE_CARRIER
+                          ? 'text-emerald-700'
+                          : selectedRisk.status === RISK_STATUS.CONDITIONAL_CARRIER
+                          ? 'text-blue-700'
+                          : 'text-slate-500'
+                      }`}>
+                        {selectedRisk.probabilityDisplay}
+                      </span>
+                    </div>
+
+                    <p className="text-[10px] leading-relaxed text-slate-600">
+                      {selectedRisk.reason}
+                    </p>
+
+                    {/* Educational assumptions */}
+                    {selectedRisk.assumptions.length > 0 && (
+                      <div className="pt-1 border-t border-slate-200/50">
+                        <div className="text-[9px] font-bold text-slate-400 mb-1">فرضیات محاسباتی:</div>
+                        <ul className="text-[9px] text-slate-500 list-disc list-inside space-y-0.5">
+                          {selectedRisk.assumptions.slice(0, 2).map((asm, idx) => (
+                            <li key={idx} className="truncate">{asm}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Mandatory Non-Diagnostic Disclaimer */}
+                    <div className="rounded bg-amber-50 border border-amber-200/70 p-2 text-[9px] text-amber-800 leading-normal">
+                      ⚠️ <strong>سلب مسئولیت آموزشی:</strong> {CLINICAL_DISCLAIMER_FA}
+                    </div>
+                  </div>
+                )}
 
                 {/* Kinship Operations */}
                 <div>
