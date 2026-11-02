@@ -11,9 +11,8 @@
 /* Clinical laboratory precision adjustments */
 html, body, #root {
   height: 100%;
-  background-color: #f8fafc;
-  color: #0f172a;
 }
+
 body {
   margin: 0;
   font-family: 'Vazirmatn', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -25,8 +24,8 @@ body {
   scrollbar-color: #cbd5e1 transparent;
 }
 .scroll-lab::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 .scroll-lab::-webkit-scrollbar-thumb {
   background: #cbd5e1;
@@ -39,7 +38,28 @@ body {
   background: transparent;
 }
 
+.dark .scroll-lab {
+  scrollbar-color: #334155 transparent;
+}
+.dark .scroll-lab::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+.dark .scroll-lab::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
 /* Touch action on canvas */
 .canvas-svg {
   touch-action: none;
 }
+
+/* Micro pulse and glowing focus animations */
+@keyframes clinical-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.04); }
+}
+
+.animate-clinical-pulse {
+  animation: clinical-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+

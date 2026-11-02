@@ -20,8 +20,10 @@ import {
 import {
   GitFork, UserPlus, Upload, Download, Undo2, Redo2, Trash2, Search,
   Plus, Minus, Maximize2, RotateCcw, Users, ChevronDown, Crosshair,
-  Layers, Dna, Activity, FileText, CheckCircle2, Bookmark, AlertTriangle, X
+  Layers, Dna, Activity, FileText, CheckCircle2, Bookmark, AlertTriangle, X,
+  Bug, Box, Sun, Moon, Sparkles, Star, ShieldCheck, HeartPulse
 } from "lucide-react";
+import CollapsibleClinicalLegend from "./components/CollapsibleClinicalLegend.jsx";
 
 const uid = (p = "p") => `${p}_${Math.random().toString(36).slice(2, 9)}`;
 const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -30,12 +32,12 @@ const clone = (x) => JSON.parse(JSON.stringify(x));
 function buildSample() {
   const tg = uid('tg');
   const a = { id: uid(), name: "پدربزرگ", sex: "male", deceased: true, deathAge: 78, spouseIds: [], childIds: [], twinType: "none" };
-  const b = { id: uid(), name: "مادربزرگ", sex: "female", spouseIds: [], childIds: [], twinType: "none" };
-  const c = { id: uid(), name: "پدر", sex: "male", spouseIds: [], childIds: [], motherId: b.id, fatherId: a.id, twinType: "none" };
-  const d = { id: uid(), name: "مادر", sex: "female", carrier: true, spouseIds: [], childIds: [], twinType: "none" };
-  const e = { id: uid(), name: "فرزند ۱ (مبتلا)", sex: "female", affected: true, hasMutation: true, spouseIds: [], childIds: [], motherId: d.id, fatherId: c.id, twinType: "none" };
-  const f = { id: uid(), name: "قل الف (همسان MZ)", sex: "male", spouseIds: [], childIds: [], motherId: d.id, fatherId: c.id, twinType: "identical", twinGroupId: tg };
-  const g = { id: uid(), name: "قل ب (همسان MZ)", sex: "male", carrier: true, spouseIds: [], childIds: [], motherId: d.id, fatherId: c.id, twinType: "identical", twinGroupId: tg };
+  const b = { id: uid(), name: "مادربزرگ", sex: "female", age: 74, spouseIds: [], childIds: [], twinType: "none" };
+  const c = { id: uid(), name: "پدر", sex: "male", age: 48, spouseIds: [], childIds: [], motherId: b.id, fatherId: a.id, twinType: "none" };
+  const d = { id: uid(), name: "مادر", sex: "female", age: 45, carrier: true, spouseIds: [], childIds: [], twinType: "none" };
+  const e = { id: uid(), name: "فرزند ۱ (مبتلا)", sex: "female", age: 16, affected: true, hasMutation: true, isProband: true, spouseIds: [], childIds: [], motherId: d.id, fatherId: c.id, twinType: "none" };
+  const f = { id: uid(), name: "قل الف (همسان MZ)", sex: "male", age: 12, spouseIds: [], childIds: [], motherId: d.id, fatherId: c.id, twinType: "identical", twinGroupId: tg };
+  const g = { id: uid(), name: "قل ب (همسان MZ)", sex: "male", age: 12, carrier: true, spouseIds: [], childIds: [], motherId: d.id, fatherId: c.id, twinType: "identical", twinGroupId: tg };
 
   a.spouseIds.push(b.id); b.spouseIds.push(a.id);
   c.spouseIds.push(d.id); d.spouseIds.push(c.id);
@@ -500,87 +502,276 @@ function useHistory(initial) {
 }
 
 // ---- Clinical Pedigree Glyph Component (ACMG/NSGC Standard) ----
-function PersonGlyph({ person, size = 50 }) {
-  const stroke = person.deceased ? "stroke-[2.5px] stroke-slate-400" : "stroke-[2px] stroke-slate-800";
-  const fill = person.affected
-    ? "fill-rose-500"
-    : person.carrier
-    ? "fill-amber-400"
-    : person.hasMutation
-    ? "fill-sky-400"
-    : "fill-white";
+function PersonGlyph({ person, size = 50, isDark = false }) {
+  const strokeColor = person.deceased
+    ? (isDark ? "#94a3b8" : "#64748b")
+    : (isDark ? "#f1f5f9" : "#1e293b");
+  const strokeWidth = 2.2;
   const shape = person.sex === "male" ? "square" : person.sex === "female" ? "circle" : "diamond";
-  const base = `${fill} ${stroke}`;
+  const r = size / 2;
 
-  if (shape === 'square') {
-    return <rect x={-size / 2} y={-size / 2} width={size} height={size} rx={4} className={base} />;
+  // Base background fill (unaffected: crisp white or dark slate)
+  const baseFill = isDark ? "#1e293b" : "#ffffff";
+  const affectedFill = isDark ? "#f43f5e" : "#e11d48";
+  const carrierFill = isDark ? "#f59e0b" : "#d97706";
+  const mutationDotColor = isDark ? "#38bdf8" : "#0284c7";
+
+  if (person.affected) {
+    // Solid fill for affected individuals (ACMG standard)
+    if (shape === "square") {
+      return <rect x={-r} y={-r} width={size} height={size} rx={3} fill={affectedFill} stroke={strokeColor} strokeWidth={strokeWidth} />;
+    }
+    if (shape === "circle") {
+      return <circle r={r} fill={affectedFill} stroke={strokeColor} strokeWidth={strokeWidth} />;
+    }
+    return <polygon points={`${-r},0 0,${-r} ${r},0 0,${r}`} fill={affectedFill} stroke={strokeColor} strokeWidth={strokeWidth} />;
   }
-  if (shape === 'circle') {
-    return <circle r={size / 2} className={base} />;
+
+  if (person.carrier) {
+    // Canonical ACMG half-shaded representation for heterozygous carriers
+    // Right half filled with carrier color, left half unaffected base
+    if (shape === "square") {
+      return (
+        <g>
+          <rect x={-r} y={-r} width={size} height={size} rx={3} fill={baseFill} />
+          <path d={`M 0,${-r} L ${r - 2},${-r} Q ${r},${-r} ${r},${-r + 2} L ${r},${r - 2} Q ${r},${r} ${r - 2},${r} L 0,${r} Z`} fill={carrierFill} />
+          <line x1={0} y1={-r} x2={0} y2={r} stroke={strokeColor} strokeWidth={1.5} />
+          <rect x={-r} y={-r} width={size} height={size} rx={3} fill="none" stroke={strokeColor} strokeWidth={strokeWidth} />
+          {person.hasMutation && <circle cx={-r / 2} cy={0} r={4.5} fill={mutationDotColor} />}
+        </g>
+      );
+    }
+    if (shape === "circle") {
+      return (
+        <g>
+          <circle r={r} fill={baseFill} />
+          <path d={`M 0,${-r} A ${r},${r} 0 0,1 0,${r} Z`} fill={carrierFill} />
+          <line x1={0} y1={-r} x2={0} y2={r} stroke={strokeColor} strokeWidth={1.5} />
+          <circle r={r} fill="none" stroke={strokeColor} strokeWidth={strokeWidth} />
+          {person.hasMutation && <circle cx={-r / 2} cy={0} r={4.5} fill={mutationDotColor} />}
+        </g>
+      );
+    }
+    return (
+      <g>
+        <polygon points={`${-r},0 0,${-r} ${r},0 0,${r}`} fill={baseFill} />
+        <polygon points={`0,${-r} ${r},0 0,${r}`} fill={carrierFill} />
+        <line x1={0} y1={-r} x2={0} y2={r} stroke={strokeColor} strokeWidth={1.5} />
+        <polygon points={`${-r},0 0,${-r} ${r},0 0,${r}`} fill="none" stroke={strokeColor} strokeWidth={strokeWidth} />
+        {person.hasMutation && <circle cx={-r / 2} cy={0} r={4.5} fill={mutationDotColor} />}
+      </g>
+    );
   }
-  return <polygon points={`${-size / 2},0 0,${-size / 2} ${size / 2},0 0,${size / 2}`} className={base} />;
+
+  // Normal / Unaffected (with optional confirmed mutation dot)
+  return (
+    <g>
+      {shape === "square" && <rect x={-r} y={-r} width={size} height={size} rx={3} fill={baseFill} stroke={strokeColor} strokeWidth={strokeWidth} />}
+      {shape === "circle" && <circle r={r} fill={baseFill} stroke={strokeColor} strokeWidth={strokeWidth} />}
+      {shape === "diamond" && <polygon points={`${-r},0 0,${-r} ${r},0 0,${r}`} fill={baseFill} stroke={strokeColor} strokeWidth={strokeWidth} />}
+      {person.hasMutation && <circle cx={0} cy={0} r={5} fill={mutationDotColor} />}
+    </g>
+  );
 }
 
-function MiniGlyph({ person, size = 18 }) {
-  const fill = person.affected ? '#e11d48' : person.carrier ? '#d97706' : person.hasMutation ? '#0284c7' : '#ffffff';
-  const stroke = person.deceased ? '#94a3b8' : '#334155';
+function MiniGlyph({ person, size = 20, isDark = false }) {
+  const stroke = person.deceased ? (isDark ? '#94a3b8' : '#64748b') : (isDark ? '#e2e8f0' : '#1e293b');
+  const baseFill = isDark ? '#1e293b' : '#ffffff';
+  const aff = isDark ? '#f43f5e' : '#e11d48';
+  const carr = isDark ? '#f59e0b' : '#d97706';
   const shape = person.sex === 'male' ? 'sq' : person.sex === 'female' ? 'ci' : 'di';
+
   return (
-    <svg width={size} height={size} viewBox="-14 -14 28 28" className="shrink-0" aria-hidden="true">
-      {shape === 'sq' && <rect x={-10} y={-10} width={20} height={20} rx={2} fill={fill} stroke={stroke} strokeWidth={2} />}
-      {shape === 'ci' && <circle r={10} fill={fill} stroke={stroke} strokeWidth={2} />}
-      {shape === 'di' && <polygon points="-10,0 0,-10 10,0 0,10" fill={fill} stroke={stroke} strokeWidth={2} />}
-      {person.deceased && <line x1={-10} y1={-10} x2={10} y2={10} stroke={stroke} strokeWidth={2} />}
+    <svg width={size} height={size} viewBox="-12 -12 24 24" className="shrink-0" aria-hidden="true">
+      {person.affected ? (
+        shape === 'sq' ? <rect x={-9} y={-9} width={18} height={18} rx={2} fill={aff} stroke={stroke} strokeWidth={1.8} /> :
+        shape === 'ci' ? <circle r={9} fill={aff} stroke={stroke} strokeWidth={1.8} /> :
+        <polygon points="-9,0 0,-9 9,0 0,9" fill={aff} stroke={stroke} strokeWidth={1.8} />
+      ) : person.carrier ? (
+        <g>
+          {shape === 'sq' && <><rect x={-9} y={-9} width={18} height={18} rx={2} fill={baseFill} /><rect x={0} y={-9} width={9} height={18} fill={carr} /><line x1={0} y1={-9} x2={0} y2={9} stroke={stroke} strokeWidth={1.2} /><rect x={-9} y={-9} width={18} height={18} rx={2} fill="none" stroke={stroke} strokeWidth={1.8} /></>}
+          {shape === 'ci' && <><circle r={9} fill={baseFill} /><path d="M 0,-9 A 9,9 0 0,1 0,9 Z" fill={carr} /><line x1={0} y1={-9} x2={0} y2={9} stroke={stroke} strokeWidth={1.2} /><circle r={9} fill="none" stroke={stroke} strokeWidth={1.8} /></>}
+          {shape === 'di' && <><polygon points="-9,0 0,-9 9,0 0,9" fill={baseFill} /><polygon points="0,-9 9,0 0,9" fill={carr} /><line x1={0} y1={-9} x2={0} y2={9} stroke={stroke} strokeWidth={1.2} /><polygon points="-9,0 0,-9 9,0 0,9" fill="none" stroke={stroke} strokeWidth={1.8} /></>}
+        </g>
+      ) : (
+        <g>
+          {shape === 'sq' && <rect x={-9} y={-9} width={18} height={18} rx={2} fill={baseFill} stroke={stroke} strokeWidth={1.8} />}
+          {shape === 'ci' && <circle r={9} fill={baseFill} stroke={stroke} strokeWidth={1.8} />}
+          {shape === 'di' && <polygon points="-9,0 0,-9 9,0 0,9" fill={baseFill} stroke={stroke} strokeWidth={1.8} />}
+          {person.hasMutation && <circle cx={0} cy={0} r={3} fill="#0284c7" />}
+        </g>
+      )}
+      {person.deceased && <line x1={-9} y1={-9} x2={9} y2={9} stroke={stroke} strokeWidth={2} />}
     </svg>
   );
 }
 
-// ---- Clinical Connectors (Lines & Double Consanguinity) ----
-const LINE = { mating: "#334155", descent: "#64748b" };
+// ---- Clinical Connectors (Lines & Double Consanguinity & Junction Beads) ----
+function FamilyConnectors({ connectors, isDark = false }) {
+  const lineMating = isDark ? "#94a3b8" : "#334155";
+  const lineDescent = isDark ? "#64748b" : "#64748b";
+  const junctionFill = isDark ? "#cbd5e1" : "#1e293b";
 
-function FamilyConnectors({ connectors }) {
   return (
     <>
+      {/* Mating lines */}
       {connectors.mating.map((s, i) => (
-        s.consanguineous ? (
+        s.points ? (
+          s.consanguineous ? (
+            <g key={`mat-${i}`}>
+              <polyline points={s.points.map(([px, py]) => `${px},${py - 3}`).join(' ')} fill="none" stroke={lineMating} strokeWidth={1.8} />
+              <polyline points={s.points.map(([px, py]) => `${px},${py + 3}`).join(' ')} fill="none" stroke={lineMating} strokeWidth={1.8} />
+            </g>
+          ) : (
+            <polyline key={`mat-${i}`} points={s.points.map(([px, py]) => `${px},${py}`).join(' ')} fill="none" stroke={lineMating} strokeWidth={2.2} />
+          )
+        ) : s.consanguineous ? (
           <g key={`mat-${i}`}>
-            <line x1={s.x1} y1={s.y1 - 2.5} x2={s.x2} y2={s.y2 - 2.5} stroke={LINE.mating} strokeWidth={1.8} />
-            <line x1={s.x1} y1={s.y1 + 2.5} x2={s.x2} y2={s.y2 + 2.5} stroke={LINE.mating} strokeWidth={1.8} />
+            <line x1={s.x1} y1={s.y1 - 3} x2={s.x2} y2={s.y2 - 3} stroke={lineMating} strokeWidth={1.8} />
+            <line x1={s.x1} y1={s.y1 + 3} x2={s.x2} y2={s.y2 + 3} stroke={lineMating} strokeWidth={1.8} />
           </g>
         ) : (
-          <line key={`mat-${i}`} x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} stroke={LINE.mating} strokeWidth={2} />
+          <line key={`mat-${i}`} x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} stroke={lineMating} strokeWidth={2.2} />
         )
       ))}
-      {connectors.drop.map((s, i) => (<line key={`drp-${i}`} x1={s.x} y1={s.y1} x2={s.x} y2={s.y2} stroke={LINE.descent} strokeWidth={1.8} />))}
-      {connectors.sibship.map((s, i) => (<line key={`sib-${i}`} x1={s.x1} y1={s.y} x2={s.x2} y2={s.y} stroke={LINE.descent} strokeWidth={1.8} />))}
+
+      {/* Vertical Descent lines from marriages with publication-quality junction pips */}
+      {connectors.drop.map((s, i) => (
+        <g key={`drp-${i}`}>
+          <circle cx={s.x} cy={s.y1} r={2.8} fill={junctionFill} />
+          <line x1={s.x} y1={s.y1} x2={s.x} y2={s.y2} stroke={lineDescent} strokeWidth={2} strokeLinecap="round" />
+        </g>
+      ))}
+
+      {/* Sibship horizontal bars */}
+      {connectors.sibship.map((s, i) => (
+        <line key={`sib-${i}`} x1={s.x1} y1={s.y} x2={s.x2} y2={s.y} stroke={lineDescent} strokeWidth={2} strokeLinecap="round" />
+      ))}
+
+      {/* Child link drops */}
       {connectors.childLink.map((s, i) => (
-        <line key={`cl-${i}`} x1={s.x1 ?? s.x} y1={s.y1} x2={s.x2 ?? s.x} y2={s.y2} stroke={LINE.descent} strokeWidth={1.8} />
+        <line key={`cl-${i}`} x1={s.x1 ?? s.x} y1={s.y1} x2={s.x2 ?? s.x} y2={s.y2} stroke={lineDescent} strokeWidth={2} strokeLinecap="round" />
       ))}
+
+      {/* Twin horizontal bars for MZ */}
       {(connectors.twinBars || []).map((s, i) => (
-        <line key={`tb-${i}`} x1={s.x1} y1={s.y} x2={s.x2} y2={s.y} stroke={LINE.descent} strokeWidth={2} />
+        <line key={`tb-${i}`} x1={s.x1} y1={s.y} x2={s.x2} y2={s.y} stroke={lineDescent} strokeWidth={2.2} strokeLinecap="round" />
       ))}
+
+      {/* Twin zygosity unknown marks */}
       {(connectors.twinMarks || []).map((m, i) => (
         <g key={`tm-${i}`} transform={`translate(${m.x},${m.y})`}>
-          <circle r={6.5} fill="#ffffff" stroke="#64748b" strokeWidth={1} />
-          <text y={3} textAnchor="middle" fill="#334155" className="text-[9px] font-bold font-mono select-none">
+          <circle r={6.5} fill={isDark ? "#1e293b" : "#ffffff"} stroke={lineDescent} strokeWidth={1.2} />
+          <text y={3} textAnchor="middle" fill={isDark ? "#f1f5f9" : "#334155"} className="text-[9px] font-bold font-mono select-none">
             {m.label || '?'}
           </text>
         </g>
       ))}
-      {connectors.longEdge.map((e, i) => (<polyline key={`le-${i}`} points={e.points.map((pt) => pt.join(',')).join(' ')} fill="none" stroke={LINE.descent} strokeWidth={1.8} strokeDasharray="5 3" />))}
+
+      {/* Long edge polylines */}
+      {connectors.longEdge.map((e, i) => (
+        <polyline key={`le-${i}`} points={e.points.map((pt) => pt.join(',')).join(' ')} fill="none" stroke={lineDescent} strokeWidth={2} strokeDasharray="5 3" />
+      ))}
     </>
   );
 }
 
-function PersonNode({ person, pos, selected, riskAssessment, onSelect, onContextMenu }) {
-  const isHighRisk = riskAssessment && (riskAssessment.status === RISK_STATUS.AFFECTED || riskAssessment.status === RISK_STATUS.OBLIGATE_CARRIER || (riskAssessment.probability && riskAssessment.probability >= 0.5));
+function PersonNode({ person, pos, selected, riskAssessment, onSelect, onContextMenu, isDark = false }) {
+  const isHighRisk = riskAssessment && (
+    riskAssessment.status === RISK_STATUS.AFFECTED ||
+    riskAssessment.status === RISK_STATUS.OBLIGATE_CARRIER ||
+    (riskAssessment.probability && riskAssessment.probability >= 0.5)
+  );
+
+  const isProband = !!person.isProband;
+
+  // Subtitle metadata string
+  const subLabel = person.deceased
+    ? (person.deathAge ? `فوت: ${person.deathAge} سال` : 'متوفی')
+    : person.age
+    ? `${person.age} سال`
+    : `کد: ${person.id.slice(0, 6)}`;
 
   return (
-    <g transform={`translate(${pos.x},${pos.y})`} data-node onClick={onSelect} onContextMenu={onContextMenu} className="cursor-pointer focus:outline-hidden" tabIndex={0} role="button" aria-label={`پرونده ${person.name || person.id}`}>
-      {selected && <circle r={38} fill="none" stroke="#2563eb" strokeWidth={2.5} strokeDasharray="4 3" />}
-      <PersonGlyph person={person} />
-      <text y={40} textAnchor="middle" className="select-none fill-slate-800 text-[11px] font-semibold tracking-tight">{person.name}</text>
-      {person.deceased && <line x1={-26} y1={-26} x2={26} y2={26} stroke={LINE.mating} strokeWidth={2} />}
+    <g
+      transform={`translate(${pos.x},${pos.y})`}
+      data-node
+      onClick={onSelect}
+      onContextMenu={onContextMenu}
+      className="cursor-pointer group focus:outline-hidden"
+      tabIndex={0}
+      role="button"
+      aria-label={`پرونده ${person.name || person.id}`}>
+
+      {/* High precision selection focus ring & reticle */}
+      {selected && (
+        <g className="animate-clinical-pulse">
+          <circle r={35} fill={isDark ? "rgba(14, 165, 233, 0.15)" : "rgba(2, 132, 199, 0.12)"} stroke="#0284c7" strokeWidth={2.2} strokeDasharray="5 3" />
+          <path d="M -30 -22 L -30 -30 L -22 -30" fill="none" stroke="#0ea5e9" strokeWidth={2} strokeLinecap="round" />
+          <path d="M 30 -22 L 30 -30 L 22 -30" fill="none" stroke="#0ea5e9" strokeWidth={2} strokeLinecap="round" />
+          <path d="M -30 22 L -30 30 L -22 30" fill="none" stroke="#0ea5e9" strokeWidth={2} strokeLinecap="round" />
+          <path d="M 30 22 L 30 30 L 22 30" fill="none" stroke="#0ea5e9" strokeWidth={2} strokeLinecap="round" />
+        </g>
+      )}
+
+      {/* Hover ring */}
+      <circle
+        r={33}
+        fill="none"
+        stroke={isDark ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.08)"}
+        strokeWidth={1}
+        className="opacity-0 group-hover:opacity-100 transition-opacity"
+      />
+
+      {/* Click hit area */}
+      <rect x={-34} y={-34} width={68} height={92} fill="transparent" />
+
+      {/* ACMG Clinical Glyph */}
+      <PersonGlyph person={person} isDark={isDark} />
+
+      {/* Deceased diagonal slash across symbol */}
+      {person.deceased && (
+        <line
+          x1={-26}
+          y1={-26}
+          x2={26}
+          y2={26}
+          stroke={isDark ? "#cbd5e1" : "#1e293b"}
+          strokeWidth={2.4}
+          strokeLinecap="round"
+        />
+      )}
+
+      {/* ACMG Proband Arrow (Index Case - pointing to lower-left of symbol) */}
+      {isProband && (
+        <g transform="translate(-25, 25)">
+          <line x1={-18} y1={18} x2={-2} y2={2} stroke="#2563eb" strokeWidth={2.2} strokeLinecap="round" />
+          <polygon points="-1,1 -7,2 -2,7" fill="#2563eb" />
+          <circle cx={-24} cy={24} r={6.5} fill="#2563eb" />
+          <text x={-24} y={27} textAnchor="middle" fill="#ffffff" className="text-[8.5px] font-bold font-mono">P</text>
+        </g>
+      )}
+
+      {/* Labels below node: Name + structured clinical metadata */}
+      <text
+        y={40}
+        textAnchor="middle"
+        className={`select-none text-[11px] font-bold tracking-tight ${
+          isDark ? "fill-slate-100" : "fill-slate-900"
+        }`}>
+        {person.name || person.id}
+      </text>
+
+      <text
+        y={53}
+        textAnchor="middle"
+        className={`select-none text-[9.5px] font-medium font-mono ${
+          isDark ? "fill-slate-400" : "fill-slate-500"
+        }`}>
+        {subLabel}
+      </text>
+
+      {/* High-risk Bayesian Carrier Alert Badge */}
       {isHighRisk && !person.affected && (
         <g transform="translate(26,-26)">
           <circle r={8.5} fill="#fef3c7" stroke="#d97706" strokeWidth={1.5} />
@@ -591,50 +782,129 @@ function PersonNode({ person, pos, selected, riskAssessment, onSelect, onContext
   );
 }
 
-// ---- Scientific Legend HUD ----
-function ClinicalLegend() {
-  const items = [
-    { t: 'sq', label: 'مذکر (XY)' },
-    { t: 'ci', label: 'مونث (XX)' },
-    { t: 'di', label: 'نامشخص' },
-    { t: 'dot', c: '#e11d48', label: 'مبتلا (فنوتیپ مثبت)' },
-    { t: 'dot', c: '#d97706', label: 'ناقل هتروزیگوت' },
-    { t: 'dot', c: '#0284c7', label: 'واریانت تاییدشده' },
-    { t: 'slash', label: 'متوفی' },
-    { t: 'consang', label: 'خویشاوندی (Double Line)' },
-    { t: 'twin_mz', label: 'دوقلوی همسان (MZ)' },
-    { t: 'twin_dz', label: 'دوقلوی ناهمسان (DZ)' },
-  ];
-  const renderItem = (it) => {
-    if (it.t === 'sq') return <rect x={-5} y={-5} width={10} height={10} fill="#fff" stroke="#334155" strokeWidth={1.5} rx={1} />;
-    if (it.t === 'ci') return <circle r={5} fill="#fff" stroke="#334155" strokeWidth={1.5} />;
-    if (it.t === 'di') return <polygon points="-5,0 0,-5 5,0 0,5" fill="#fff" stroke="#334155" strokeWidth={1.5} />;
-    if (it.t === 'dot') return <circle r={5} fill={it.c} />;
-    if (it.t === 'consang') return <g><line x1={-6} y1={-2} x2={6} y2={-2} stroke="#334155" strokeWidth={1.5} /><line x1={-6} y1={2} x2={6} y2={2} stroke="#334155" strokeWidth={1.5} /></g>;
-    if (it.t === 'twin_mz') return <g><path d="M-6,5 L0,-3 L6,5" fill="none" stroke="#64748b" strokeWidth={1.5} /><line x1={-3} y1={1.5} x2={3} y2={1.5} stroke="#64748b" strokeWidth={1.5} /></g>;
-    if (it.t === 'twin_dz') return <path d="M-6,5 L0,-3 L6,5" fill="none" stroke="#64748b" strokeWidth={1.5} />;
-    return <line x1={-5} y1={-5} x2={5} y2={5} stroke="#334155" strokeWidth={1.5} />;
-  };
+// ---- Scientific Debug Bounding Boxes Overlay (Collision & Spacing Logic) ----
+function DebugBoundingBoxesOverlay({ debugBoxes, showClearance = true }) {
+  if (!debugBoxes) return null;
+  const { nodes = [], connectors = [] } = debugBoxes;
+
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-slate-700">
-      {items.map((it, i) => (
-        <span key={i} className="inline-flex items-center gap-1.5">
-          <svg width="14" height="14" viewBox="-8 -8 16 16" aria-hidden="true">{renderItem(it)}</svg>
-          <span className="font-medium">{it.label}</span>
-        </span>
+    <g className="debug-bounding-boxes-overlay select-none pointer-events-none">
+      {/* 1. Clearance Corridor Envelopes around Nodes */}
+      {showClearance && nodes.map((box) => (
+        <g key={`dbg-clr-${box.id}`}>
+          <rect
+            x={box.clearanceBox.x}
+            y={box.clearanceBox.y}
+            width={box.clearanceBox.width}
+            height={box.clearanceBox.height}
+            fill="rgba(245, 158, 11, 0.05)"
+            stroke="#f59e0b"
+            strokeWidth={1}
+            strokeDasharray="3 3"
+            rx={4}
+          />
+          <text
+            x={box.clearanceBox.x + 4}
+            y={box.clearanceBox.y + 9}
+            fill="#d97706"
+            className="text-[7.5px] font-mono font-medium">
+            حریم {box.clearanceBox.width}px
+          </text>
+        </g>
       ))}
-    </div>
+
+      {/* 2. Connector Lines Bounding Boxes */}
+      {connectors.map((c) => {
+        const color = {
+          mating: { stroke: '#818cf8', fill: 'rgba(99, 102, 241, 0.08)', text: '#4f46e5' },
+          sibship: { stroke: '#34d399', fill: 'rgba(16, 185, 129, 0.08)', text: '#059669' },
+          drop: { stroke: '#94a3b8', fill: 'rgba(148, 163, 184, 0.12)', text: '#475569' },
+          childLink: { stroke: '#2dd4bf', fill: 'rgba(20, 184, 166, 0.07)', text: '#0d9488' },
+          twinBar: { stroke: '#fbbf24', fill: 'rgba(245, 158, 11, 0.14)', text: '#b45309' },
+        }[c.type] || { stroke: '#94a3b8', fill: 'rgba(148, 163, 184, 0.08)', text: '#64748b' };
+
+        return (
+          <g key={`dbg-conn-${c.id}`}>
+            <rect
+              x={c.x}
+              y={c.y}
+              width={Math.max(c.width, 4)}
+              height={Math.max(c.height, 4)}
+              fill={color.fill}
+              stroke={color.stroke}
+              strokeWidth={1.3}
+              strokeDasharray="4 2"
+              rx={2}
+            />
+            {c.width > 24 && (
+              <text
+                x={c.x + c.width / 2}
+                y={c.y - 3}
+                textAnchor="middle"
+                fill={color.text}
+                className="text-[8px] font-mono font-bold">
+                {c.label} ({c.width}px)
+              </text>
+            )}
+          </g>
+        );
+      })}
+
+      {/* 3. Tight Physical Bounding Envelopes around Nodes */}
+      {nodes.map((box) => (
+        <g key={`dbg-node-${box.id}`}>
+          {/* Node physical envelope */}
+          <rect
+            x={box.x}
+            y={box.y}
+            width={box.width}
+            height={box.height}
+            fill="rgba(14, 165, 233, 0.09)"
+            stroke="#0284c7"
+            strokeWidth={1.5}
+            strokeDasharray="4 2"
+            rx={3}
+          />
+          {/* Header pill showing dimensions and coordinates */}
+          <g transform={`translate(${box.x}, ${box.y - 12})`}>
+            <rect width={box.width} height={12} fill="#0284c7" rx={2} />
+            <text
+              x={box.width / 2}
+              y={9}
+              textAnchor="middle"
+              fill="#ffffff"
+              className="text-[7.5px] font-mono font-bold tracking-tight">
+              {box.width}×{box.height}
+            </text>
+          </g>
+          {/* Center marker crosshair */}
+          <line x1={box.centerX - 4} y1={box.centerY} x2={box.centerX + 4} y2={box.centerY} stroke="#0284c7" strokeWidth={1} />
+          <line x1={box.centerX} y1={box.centerY - 4} x2={box.centerX} y2={box.centerY + 4} stroke="#0284c7" strokeWidth={1} />
+        </g>
+      ))}
+    </g>
   );
 }
 
+// ---- Scientific Legend HUD ----
+function ClinicalLegend({ isDark = false, defaultExpanded = false }) {
+  return <CollapsibleClinicalLegend isDark={isDark} defaultExpanded={defaultExpanded} />;
+}
+
 // ---- Scientific UI Button & Input Primitives ----
-function LabBtn({ children, onClick, variant = 'default', className = '', title, disabled, ariaLabel }) {
+function LabBtn({ children, onClick, variant = 'default', className = '', title, disabled, ariaLabel, isDark = false }) {
   const styles = {
     primary: "bg-blue-600 hover:bg-blue-700 text-white border-blue-600 shadow-sm focus-visible:ring-2 focus-visible:ring-blue-500",
-    danger: "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 focus-visible:ring-2 focus-visible:ring-rose-500",
-    default: "bg-white text-slate-700 border-slate-300 hover:bg-slate-50 shadow-sm focus-visible:ring-2 focus-visible:ring-slate-400",
-    success: "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 focus-visible:ring-2 focus-visible:ring-emerald-500",
-  }[variant] || "bg-white text-slate-700 border-slate-300 hover:bg-slate-50";
+    danger: isDark
+      ? "bg-rose-950/60 text-rose-300 border-rose-800 hover:bg-rose-900/60 focus-visible:ring-2 focus-visible:ring-rose-500"
+      : "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 focus-visible:ring-2 focus-visible:ring-rose-500",
+    default: isDark
+      ? "bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700/80 shadow-sm focus-visible:ring-2 focus-visible:ring-slate-500"
+      : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50 shadow-sm focus-visible:ring-2 focus-visible:ring-slate-400",
+    success: isDark
+      ? "bg-emerald-950/60 text-emerald-300 border-emerald-800 hover:bg-emerald-900/60 focus-visible:ring-2 focus-visible:ring-emerald-500"
+      : "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 focus-visible:ring-2 focus-visible:ring-emerald-500",
+  }[variant] || "";
 
   return (
     <button title={title} aria-label={ariaLabel || title} disabled={disabled} onClick={onClick}
@@ -644,41 +914,53 @@ function LabBtn({ children, onClick, variant = 'default', className = '', title,
   );
 }
 
-function LabIconBtn({ children, onClick, title, disabled, className = '', ariaLabel }) {
+function LabIconBtn({ children, onClick, title, disabled, className = '', ariaLabel, isDark = false }) {
   return (
     <button title={title} aria-label={ariaLabel || title} disabled={disabled} onClick={onClick}
-      className={`grid h-8 w-8 place-items-center rounded-lg border border-slate-300 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-40 outline-hidden ${className}`}>
+      className={`grid h-8 w-8 place-items-center rounded-lg border shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40 outline-hidden ${
+        isDark
+          ? "border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700"
+          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+      } ${className}`}>
       {children}
     </button>
   );
 }
 
-function LabStat({ label, value, unit, color = "blue" }) {
+function LabStat({ label, value, unit, color = "blue", isDark = false }) {
   const colorMap = {
-    blue: "text-blue-600",
-    emerald: "text-emerald-600",
-    rose: "text-rose-600",
-    amber: "text-amber-600",
-    slate: "text-slate-800",
-  }[color] || "text-slate-800";
+    blue: isDark ? "text-sky-400" : "text-blue-600",
+    emerald: isDark ? "text-emerald-400" : "text-emerald-600",
+    rose: isDark ? "text-rose-400" : "text-rose-600",
+    amber: isDark ? "text-amber-400" : "text-amber-600",
+    slate: isDark ? "text-slate-100" : "text-slate-800",
+  }[color] || (isDark ? "text-slate-100" : "text-slate-800");
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
-      <div className="text-[10px] font-medium tracking-wider uppercase text-slate-400">{label}</div>
+    <div className={`rounded-xl border p-2.5 shadow-xs transition ${
+      isDark ? "border-slate-800 bg-slate-900/90" : "border-slate-200 bg-white"
+    }`}>
+      <div className={`text-[10px] font-medium tracking-wider uppercase ${isDark ? "text-slate-400" : "text-slate-400"}`}>{label}</div>
       <div className="mt-0.5 flex items-baseline gap-1">
         <span className={`text-xl font-bold font-mono tabular-nums ${colorMap}`}>{value}</span>
-        {unit && <span className="text-[10px] font-mono text-slate-400">{unit}</span>}
+        {unit && <span className={`text-[10px] font-mono ${isDark ? "text-slate-400" : "text-slate-400"}`}>{unit}</span>}
       </div>
     </div>
   );
 }
 
-function Segmented({ value, onChange, options }) {
+function Segmented({ value, onChange, options, isDark = false }) {
   return (
-    <div className="flex gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1">
+    <div className={`flex gap-1 rounded-lg border p-1 ${
+      isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-slate-100"
+    }`}>
       {options.map((o) => (
         <button key={o.value} type="button" onClick={() => onChange(o.value)}
-          className={`flex-1 rounded-md py-1.5 text-xs font-medium transition outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 ${value === o.value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
+          className={`flex-1 rounded-md py-1.5 text-xs font-medium transition outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 ${
+            value === o.value
+              ? isDark ? 'bg-slate-800 text-white shadow-sm' : 'bg-white text-slate-900 shadow-sm'
+              : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'
+          }`}>
           {o.label}
         </button>
       ))}
@@ -686,12 +968,16 @@ function Segmented({ value, onChange, options }) {
   );
 }
 
-function LabToggle({ checked, onChange, label }) {
+function LabToggle({ checked, onChange, label, isDark = false }) {
   return (
     <button type="button" onClick={() => onChange(!checked)}
-      className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium transition hover:bg-slate-50 outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500">
-      <span className="text-slate-700">{label}</span>
-      <span className={`relative inline-block h-4 w-8 rounded-full transition ${checked ? 'bg-blue-600' : 'bg-slate-200'}`}>
+      className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 ${
+        isDark
+          ? "border-slate-800 bg-slate-900/80 hover:bg-slate-800 text-slate-200"
+          : "border-slate-200 bg-white hover:bg-slate-50 text-slate-700"
+      }`}>
+      <span>{label}</span>
+      <span className={`relative inline-block h-4 w-8 rounded-full transition ${checked ? 'bg-blue-600' : isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
         <span className="absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all" style={{ left: checked ? 18 : 2 }} />
       </span>
     </button>
@@ -721,6 +1007,9 @@ export default function GeneticPedigreeApp() {
   const [savedCases, setSavedCases] = useState([]);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [debugMode, setDebugMode] = useState(false);
+  const [showClearance, setShowClearance] = useState(true);
+  const [isDark, setIsDark] = useState(false);
 
   const svgRef = useRef(null);
   const wrapRef = useRef(null);
@@ -876,10 +1165,10 @@ export default function GeneticPedigreeApp() {
 
   const exportCSV = () => {
     const rows = [
-      ["SAMPLE_ID", "CASE_NAME", "SEX", "AFFECTED", "CARRIER", "DECEASED", "MUTATION", "ONSET_AGE", "DEATH_AGE", "ZYGOSITY", "MOTHER_ID", "FATHER_ID", "SPOUSES", "CHILDREN"],
+      ["SAMPLE_ID", "CASE_NAME", "SEX", "AFFECTED", "CARRIER", "DECEASED", "MUTATION", "IS_PROBAND", "AGE", "ONSET_AGE", "DEATH_AGE", "ZYGOSITY", "MOTHER_ID", "FATHER_ID", "SPOUSES", "CHILDREN"],
       ...people.map((p) => [
-        p.id, p.name, p.sex, !!p.affected, !!p.carrier, !!p.deceased, !!p.hasMutation,
-        p.diseaseOnsetAge ?? "", p.deathAge ?? "", p.twinType || "none",
+        p.id, p.name, p.sex, !!p.affected, !!p.carrier, !!p.deceased, !!p.hasMutation, !!p.isProband,
+        p.age ?? "", p.diseaseOnsetAge ?? "", p.deathAge ?? "", p.twinType || "none",
         p.motherId || "", p.fatherId || "", (p.spouseIds || []).join(";"), (p.childIds || []).join(";")
       ]),
     ];
@@ -908,7 +1197,7 @@ export default function GeneticPedigreeApp() {
       const canvas = document.createElement('canvas');
       canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = isDark ? '#090d16' : '#ffffff';
       ctx.fillRect(0, 0, w, h);
       ctx.drawImage(img, 0, 0, w, h);
       canvas.toBlob((png) => { if (png) downloadBlob(png, 'pedigree_clinical.png'); URL.revokeObjectURL(url); });
@@ -984,10 +1273,12 @@ export default function GeneticPedigreeApp() {
   }, [state.selectedId, dispatch]);
 
   return (
-    <div dir="rtl" className="flex h-screen w-full flex-col bg-slate-100 text-slate-800">
+    <div dir="rtl" className={`flex h-screen w-full flex-col transition-colors duration-200 ${
+      isDark ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-100 text-slate-900'
+    }`}>
       {/* Alert toast */}
       {errorMsg && (
-        <div role="alert" className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg border border-rose-300 bg-rose-600 px-4 py-2 text-xs font-semibold text-white shadow-xl">
+        <div role="alert" className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-xl border border-rose-500 bg-rose-600 px-4 py-2.5 text-xs font-semibold text-white shadow-2xl">
           <AlertTriangle size={16} />
           <span>{errorMsg}</span>
           <button onClick={() => setErrorMsg('')} className="mr-2 rounded p-0.5 hover:bg-rose-700"><X size={14} /></button>
@@ -996,7 +1287,7 @@ export default function GeneticPedigreeApp() {
 
       {/* Success toast */}
       {successMsg && (
-        <div role="status" className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow-xl">
+        <div role="status" className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-xl border border-emerald-500 bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-white shadow-2xl">
           <CheckCircle2 size={16} />
           <span>{successMsg}</span>
           <button onClick={() => setSuccessMsg('')} className="mr-2 rounded p-0.5 hover:bg-emerald-700"><X size={14} /></button>
@@ -1005,23 +1296,29 @@ export default function GeneticPedigreeApp() {
 
       {/* Delete Confirmation Modal */}
       {deleteConfirmId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
-          <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-5 shadow-2xl space-y-4">
-            <div className="flex items-center gap-3 text-rose-600">
-              <div className="grid h-10 w-10 place-items-center rounded-lg bg-rose-50 border border-rose-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4">
+          <div className={`w-full max-w-sm rounded-2xl border p-5 shadow-2xl space-y-4 ${
+            isDark ? 'border-slate-800 bg-slate-900 text-slate-100' : 'border-slate-200 bg-white text-slate-900'
+          }`}>
+            <div className="flex items-center gap-3 text-rose-500">
+              <div className={`grid h-10 w-10 place-items-center rounded-xl border ${
+                isDark ? 'bg-rose-950/40 border-rose-800' : 'bg-rose-50 border-rose-200'
+              }`}>
                 <Trash2 size={20} />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-slate-900">تایید حذف پرونده فرد</h3>
-                <p className="text-xs text-slate-500">آیا از حذف این فرد اطمینان دارید؟</p>
+                <h3 className="text-sm font-bold">تایید حذف فرد از شجره‌نامه</h3>
+                <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>آیا از حذف این پرونده اطمینان دارید؟</p>
               </div>
             </div>
-            <p className="text-xs leading-relaxed text-slate-600 bg-slate-50 p-3 rounded-lg border border-slate-200">
+            <p className={`text-xs leading-relaxed p-3 rounded-xl border ${
+              isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600'
+            }`}>
               با حذف این فرد، تمام اتصالات والدینی، همسری و فرزندی وابسته به وی قطع خواهد شد. این عملیات با کلید Undo قابل بازگشت است.
             </p>
             <div className="flex justify-end gap-2 pt-1">
-              <LabBtn onClick={() => setDeleteConfirmId(null)}>انصراف</LabBtn>
-              <LabBtn variant="danger" onClick={() => {
+              <LabBtn isDark={isDark} onClick={() => setDeleteConfirmId(null)}>انصراف</LabBtn>
+              <LabBtn variant="danger" isDark={isDark} onClick={() => {
                 dispatch({ type: 'DELETE', id: deleteConfirmId });
                 setDeleteConfirmId(null);
               }}>
@@ -1034,30 +1331,38 @@ export default function GeneticPedigreeApp() {
 
       {/* Saved Cases Modal */}
       {storageOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4">
+          <div className={`w-full max-w-md rounded-2xl border p-5 shadow-2xl space-y-4 ${
+            isDark ? 'border-slate-800 bg-slate-900 text-slate-100' : 'border-slate-200 bg-white text-slate-900'
+          }`}>
+            <div className={`flex items-center justify-between border-b pb-3 ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
               <div className="flex items-center gap-2">
-                <Bookmark size={18} className="text-blue-600" />
-                <h3 className="text-sm font-bold text-slate-900">پرونده‌های ذخیره‌شده محلی (Local Cases)</h3>
+                <Bookmark size={18} className="text-blue-500" />
+                <h3 className="text-sm font-bold">پرونده‌های ذخیره‌شده محلی (Local Cases)</h3>
               </div>
-              <button onClick={() => setStorageOpen(false)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"><X size={16} /></button>
+              <button onClick={() => setStorageOpen(false)} className={`rounded-lg p-1 transition ${
+                isDark ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'
+              }`}>
+                <X size={16} />
+              </button>
             </div>
-            <div className="max-h-72 overflow-y-auto space-y-2">
+            <div className="max-h-72 overflow-y-auto space-y-2 scroll-lab">
               {savedCases.length === 0 ? (
-                <div className="py-8 text-center text-xs text-slate-400">هیچ پرونده‌ای در حافظه مرورگر ذخیره نشده است.</div>
+                <div className={`py-8 text-center text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>هیچ پرونده‌ای در حافظه مرورگر ذخیره نشده است.</div>
               ) : (
                 savedCases.map((c) => (
-                  <div key={c.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 p-3 hover:bg-slate-50 transition">
+                  <div key={c.id} className={`flex items-center justify-between gap-3 rounded-xl border p-3 transition ${
+                    isDark ? 'border-slate-800 bg-slate-950/50 hover:bg-slate-800/60' : 'border-slate-200 bg-white hover:bg-slate-50'
+                  }`}>
                     <div className="min-w-0">
-                      <div className="text-xs font-bold text-slate-800 truncate">{c.title || c.id}</div>
+                      <div className={`text-xs font-bold truncate ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{c.title || c.id}</div>
                       <div className="text-[10px] text-slate-400 font-mono mt-0.5">
                         {c.personCount} عضو · بروزرسانی: {new Date(c.updatedAt).toLocaleDateString('fa-IR')}
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
-                      <LabBtn onClick={() => handleLoadCase(c.id)}>بازخوانی</LabBtn>
-                      <LabIconBtn title="حذف" onClick={() => handleDeleteCase(c.id)} className="text-rose-600 border-rose-200 hover:bg-rose-50">
+                      <LabBtn isDark={isDark} onClick={() => handleLoadCase(c.id)}>بازخوانی</LabBtn>
+                      <LabIconBtn isDark={isDark} title="حذف" onClick={() => handleDeleteCase(c.id)} className="text-rose-500 hover:bg-rose-500/10">
                         <Trash2 size={12} />
                       </LabIconBtn>
                     </div>
@@ -1065,27 +1370,33 @@ export default function GeneticPedigreeApp() {
                 ))
               )}
             </div>
-            <div className="flex justify-end pt-2 border-t border-slate-100">
-              <LabBtn onClick={() => setStorageOpen(false)}>بستن پنجره</LabBtn>
+            <div className={`flex justify-end pt-2 border-t ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
+              <LabBtn isDark={isDark} onClick={() => setStorageOpen(false)}>بستن پنجره</LabBtn>
             </div>
           </div>
         </div>
       )}
 
       {/* Top Laboratory Console Ribbon */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 shadow-xs">
+      <header className={`flex h-14 shrink-0 items-center justify-between border-b px-4 transition-colors ${
+        isDark ? 'border-slate-800 bg-slate-900/90' : 'border-slate-200 bg-white'
+      } shadow-xs`}>
         <div className="flex items-center gap-3">
-          <div className="grid h-8 w-8 place-items-center rounded-lg bg-blue-600 text-white shadow-xs">
-            <Dna size={18} />
+          <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-xs">
+            <Dna size={19} />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-sm font-bold text-slate-900">کنسول آنالیز شجره‌نامه ژنتیک بالینی</h1>
-              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-medium text-slate-600 border border-slate-200">
+              <h1 className={`text-sm font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                کنسول آنالیز شجره‌نامه ژنتیک بالینی
+              </h1>
+              <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-mono font-medium border ${
+                isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-600'
+              }`}>
                 CASE-REF: #GEN-8420
               </span>
             </div>
-            <p className="text-[11px] text-slate-400">
+            <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
               استاندارد جهانی رسم شجره‌نامه ACMG/NSGC · موتور سلسله‌مراتبی فاقد تداخل
             </p>
           </div>
@@ -1093,60 +1404,74 @@ export default function GeneticPedigreeApp() {
 
         <div className="flex items-center gap-2">
           {/* Inheritance Model Selector */}
-          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1">
-            <span className="text-[10px] font-bold text-slate-500">الگوی وراثت:</span>
+          <div className={`flex items-center gap-1.5 border rounded-xl px-2.5 py-1 ${
+            isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-slate-50 border-slate-200'
+          }`}>
+            <span className={`text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>الگوی وراثت:</span>
             <select
               value={state.inheritanceModel}
               onChange={(e) => dispatch({ type: 'SET_MODEL', model: e.target.value })}
-              className="bg-transparent text-xs font-semibold text-blue-700 outline-hidden cursor-pointer">
+              className={`bg-transparent text-xs font-semibold outline-hidden cursor-pointer ${
+                isDark ? 'text-sky-400' : 'text-blue-700'
+              }`}>
               <option value={INHERITANCE_MODELS.AUTOSOMAL_RECESSIVE}>اتوزوم مغلوب (AR)</option>
               <option value={INHERITANCE_MODELS.AUTOSOMAL_DOMINANT}>اتوزوم غالب (AD)</option>
               <option value={INHERITANCE_MODELS.X_LINKED_RECESSIVE}>وابسته به X مغلوب (XR)</option>
             </select>
           </div>
 
-          <div className="h-4 w-px bg-slate-200" />
+          <div className={`h-4 w-px ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`} />
 
-          <LabBtn variant="primary" onClick={() => dispatch({ type: 'ADD_PERSON' })}>
+          <LabBtn variant="primary" isDark={isDark} onClick={() => dispatch({ type: 'ADD_PERSON' })}>
             <UserPlus size={14} /> ثبت فرد جدید
           </LabBtn>
 
           {/* Presets dropdown */}
           <div className="relative">
-            <LabBtn onClick={() => setPresetsOpen((o) => !o)}>
+            <LabBtn isDark={isDark} onClick={() => setPresetsOpen((o) => !o)}>
               <Layers size={14} /> الگوهای آزمایشی <ChevronDown size={12} />
             </LabBtn>
             {presetsOpen && (
-              <div className="absolute left-0 top-full z-40 mt-1 w-72 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+              <div className={`absolute left-0 top-full z-40 mt-1 w-72 rounded-xl border p-1.5 shadow-xl ${
+                isDark ? 'border-slate-800 bg-slate-900 text-slate-100' : 'border-slate-200 bg-white text-slate-800'
+              }`}>
                 <button onClick={() => { dispatch({ type: 'LOAD', data: build20GenPedigree() }); setPresetsOpen(false); setTimeout(fitView, 50); }}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-right text-xs hover:bg-slate-50">
-                  <GitFork size={14} className="text-emerald-600" />
+                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-xs transition ${
+                    isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-50'
+                  }`}>
+                  <GitFork size={14} className="text-emerald-500" />
                   <div>
-                    <div className="font-semibold text-slate-800">شجره‌نامه ۲۰ نسلی ۵ فرزندی</div>
+                    <div className="font-semibold">شجره‌نامه ۲۰ نسلی ۵ فرزندی</div>
                     <div className="text-[10px] text-slate-400">شامل دوقلوها (MZ/DZ)، چندهمسری و خویشاوندی</div>
                   </div>
                 </button>
                 <button onClick={() => { dispatch({ type: 'LOAD', data: buildSample() }); setPresetsOpen(false); setTimeout(fitView, 50); }}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-right text-xs hover:bg-slate-50">
-                  <Activity size={14} className="text-blue-600" />
+                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-xs transition ${
+                    isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-50'
+                  }`}>
+                  <Activity size={14} className="text-blue-500" />
                   <div>
-                    <div className="font-semibold text-slate-800">خانواده استاندارد بالینی</div>
-                    <div className="text-[10px] text-slate-400">۳ نسل، دوقلو و موارد بالینی</div>
+                    <div className="font-semibold">خانواده استاندارد بالینی</div>
+                    <div className="text-[10px] text-slate-400">۳ نسل، دوقلو، پروباند و موارد بالینی</div>
                   </div>
                 </button>
                 <button onClick={() => { dispatch({ type: 'LOAD', data: build5ChildTree(2) }); setPresetsOpen(false); setTimeout(fitView, 50); }}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-right text-xs hover:bg-slate-50">
-                  <GitFork size={14} className="text-cyan-600" />
+                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-xs transition ${
+                    isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-50'
+                  }`}>
+                  <GitFork size={14} className="text-cyan-500" />
                   <div>
-                    <div className="font-semibold text-slate-800">الگوی ۵ فرزند در هر خانواده</div>
+                    <div className="font-semibold">الگوی ۵ فرزند در هر خانواده</div>
                     <div className="text-[10px] text-slate-400">هر فرزند یک همسر و ۵ فرزند (چندشاخه)</div>
                   </div>
                 </button>
                 <button onClick={() => { dispatch({ type: 'LOAD', data: buildLargeSample(50) }); setPresetsOpen(false); setTimeout(fitView, 50); }}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-right text-xs hover:bg-slate-50">
-                  <Layers size={14} className="text-indigo-600" />
+                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-xs transition ${
+                    isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-50'
+                  }`}>
+                  <Layers size={14} className="text-indigo-400" />
                   <div>
-                    <div className="font-semibold text-slate-800">شجره‌نامه ۵۰ نسلی (طولی)</div>
+                    <div className="font-semibold">شجره‌نامه ۵۰ نسلی (طولی)</div>
                     <div className="text-[10px] text-slate-400">عمق فوق‌العاده بالا، بدون افت کارایی</div>
                   </div>
                 </button>
@@ -1154,33 +1479,37 @@ export default function GeneticPedigreeApp() {
             )}
           </div>
 
-          <div className="h-4 w-px bg-slate-200" />
-          <LabIconBtn title="بازگردانی (Ctrl+Z)" disabled={!canUndo} onClick={() => dispatch({ type: 'UNDO' })}><Undo2 size={14} /></LabIconBtn>
-          <LabIconBtn title="تکرار (Ctrl+Shift+Z)" disabled={!canRedo} onClick={() => dispatch({ type: 'REDO' })}><Redo2 size={14} /></LabIconBtn>
+          <div className={`h-4 w-px ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`} />
+          <LabIconBtn isDark={isDark} title="بازگردانی (Ctrl+Z)" disabled={!canUndo} onClick={() => dispatch({ type: 'UNDO' })}><Undo2 size={14} /></LabIconBtn>
+          <LabIconBtn isDark={isDark} title="تکرار (Ctrl+Shift+Z)" disabled={!canRedo} onClick={() => dispatch({ type: 'REDO' })}><Redo2 size={14} /></LabIconBtn>
 
-          <div className="h-4 w-px bg-slate-200" />
+          <div className={`h-4 w-px ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`} />
 
           {/* Local Persistence Buttons */}
-          <LabBtn onClick={handleSaveLocal} title="ذخیره شجره‌نامه در حافظه مرورگر">
+          <LabBtn isDark={isDark} onClick={handleSaveLocal} title="ذخیره شجره‌نامه در حافظه مرورگر">
             <Bookmark size={14} /> ذخیره در مرورگر
           </LabBtn>
-          <LabBtn onClick={handleOpenStorageModal} title="مشاهده پرونده‌های ذخیره‌شده">
+          <LabBtn isDark={isDark} onClick={handleOpenStorageModal} title="مشاهده پرونده‌های ذخیره‌شده">
             <FileText size={14} /> پرونده‌ها
           </LabBtn>
 
-          <div className="h-4 w-px bg-slate-200" />
+          <div className={`h-4 w-px ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`} />
 
-          <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 transition">
+          <label className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium shadow-xs transition ${
+            isDark ? 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+          }`}>
             <Upload size={14} /> ورود داده
             <input type="file" accept="application/json" className="hidden" onChange={importJSON} />
           </label>
 
           <div className="relative">
-            <LabBtn onClick={() => setExportOpen((o) => !o)}>
+            <LabBtn isDark={isDark} onClick={() => setExportOpen((o) => !o)}>
               <Download size={14} /> گزارش آزمایشگاهی <ChevronDown size={12} />
             </LabBtn>
             {exportOpen && (
-              <div className="absolute left-0 top-full z-40 mt-1 w-44 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+              <div className={`absolute left-0 top-full z-40 mt-1 w-48 rounded-xl border p-1 shadow-lg ${
+                isDark ? 'border-slate-800 bg-slate-900 text-slate-100' : 'border-slate-200 bg-white text-slate-800'
+              }`}>
                 {[
                   ['فرمت داده JSON', exportJSON],
                   ['جدول اطلاعاتی CSV (اکسل)', exportCSV],
@@ -1188,13 +1517,26 @@ export default function GeneticPedigreeApp() {
                   ['تصویر رندرشده PNG', exportPNG],
                 ].map(([label, fn]) => (
                   <button key={label} onClick={() => { fn(); setExportOpen(false); }}
-                    className="block w-full rounded-md px-3 py-2 text-right text-xs text-slate-700 hover:bg-slate-50">
+                    className={`block w-full rounded-lg px-3 py-2 text-right text-xs transition ${
+                      isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-50'
+                    }`}>
                     {label}
                   </button>
                 ))}
               </div>
             )}
           </div>
+
+          <div className={`h-4 w-px ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`} />
+
+          {/* Clinical Theme Toggle Button */}
+          <LabIconBtn
+            isDark={isDark}
+            title={isDark ? "تغییر به تم روشن بالینی (Light Lab)" : "تغییر به تم تاریک آزمایشگاهی (Dark Lab)"}
+            ariaLabel="تغییر تم"
+            onClick={() => setIsDark((v) => !v)}>
+            {isDark ? <Sun size={15} className="text-amber-400" /> : <Moon size={15} className="text-slate-600" />}
+          </LabIconBtn>
         </div>
       </header>
 
@@ -1202,48 +1544,75 @@ export default function GeneticPedigreeApp() {
       <div className="flex min-h-0 flex-1 gap-3 p-3">
         {/* Left Clinical Sidebar: Samples & Registry */}
         <aside className="flex w-72 shrink-0 flex-col gap-3">
-          <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-slate-200 bg-white shadow-xs">
-            <div className="flex items-center justify-between border-b border-slate-100 p-3">
+          <div className={`flex min-h-0 flex-1 flex-col rounded-2xl border shadow-xs transition ${
+            isDark ? 'border-slate-800 bg-slate-900/90' : 'border-slate-200 bg-white'
+          }`}>
+            <div className={`flex items-center justify-between border-b p-3 ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
               <div className="flex items-center gap-2">
-                <Users size={16} className="text-blue-600" />
-                <h2 className="text-xs font-bold text-slate-800">پرونده‌ها و نمونه‌ها</h2>
+                <Users size={16} className="text-blue-500" />
+                <h2 className="text-xs font-bold">پرونده‌ها و نمونه‌ها</h2>
               </div>
-              <span className="font-mono text-[11px] font-semibold text-slate-500">
+              <span className={`font-mono text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 {filtered.length} / {people.length}
               </span>
             </div>
 
-            <div className="p-2 border-b border-slate-100">
+            <div className={`p-2 border-b ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
               <div className="relative">
                 <Search size={14} className="pointer-events-none absolute right-2.5 top-2.5 text-slate-400" />
                 <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="جستجو بر اساس نام یا کد..."
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 py-1.5 pr-8 pl-2 text-xs outline-none focus:border-blue-500 focus:bg-white transition" />
+                  className={`w-full rounded-xl border py-1.5 pr-8 pl-2 text-xs outline-none transition ${
+                    isDark
+                      ? 'border-slate-700 bg-slate-950 text-slate-100 focus:border-blue-500'
+                      : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-500 focus:bg-white'
+                  }`} />
               </div>
             </div>
 
-            <div className="scroll-lab flex-1 overflow-y-auto p-1 space-y-1">
+            <div className="scroll-lab flex-1 overflow-y-auto p-1.5 space-y-1">
               {filtered.length === 0 && (
-                <div className="py-8 text-center text-xs text-slate-400">هیچ نمونه‌ای یافت نشد</div>
+                <div className={`py-8 text-center text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>هیچ نمونه‌ای یافت نشد</div>
               )}
               {filtered.map((p) => {
                 const isSel = state.selectedId === p.id;
                 return (
                   <div key={p.id}
                     onClick={() => focusPerson(p.id)}
-                    className={`flex items-center justify-between gap-2 rounded-lg p-2 cursor-pointer transition text-xs border ${
-                      isSel ? 'border-blue-500 bg-blue-50/60 text-blue-900 font-semibold' : 'border-transparent hover:bg-slate-50 text-slate-700'
+                    className={`flex items-center justify-between gap-2 rounded-xl p-2 cursor-pointer transition text-xs border ${
+                      isSel
+                        ? (isDark ? 'border-sky-500 bg-sky-950/40 text-white font-semibold' : 'border-blue-500 bg-blue-50/70 text-blue-900 font-semibold')
+                        : (isDark ? 'border-transparent hover:bg-slate-800/60 text-slate-300' : 'border-transparent hover:bg-slate-50 text-slate-700')
                     }`}>
                     <div className="flex items-center gap-2 min-w-0">
-                      <MiniGlyph person={p} />
+                      <MiniGlyph person={p} isDark={isDark} />
                       <div className="truncate">
-                        <div className="truncate text-xs">{p.name || 'بی‌نام'}</div>
-                        <div className="text-[10px] font-mono text-slate-400">{p.id.slice(0, 8)}</div>
+                        <div className="truncate text-xs flex items-center gap-1.5">
+                          <span>{p.name || 'بی‌نام'}</span>
+                          {p.isProband && (
+                            <span className="font-mono text-[9px] font-bold text-blue-500">[P]</span>
+                          )}
+                        </div>
+                        <div className="text-[10px] font-mono text-slate-400">
+                          {p.deceased ? `فوت${p.deathAge ? ` (${p.deathAge})` : ''}` : p.age ? `${p.age} سال` : p.id.slice(0, 7)}
+                        </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
-                      {p.affected && <span className="rounded bg-rose-100 px-1 py-0.5 text-[9px] font-bold text-rose-700">مبتلا</span>}
-                      {p.carrier && <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-700">ناقل</span>}
-                      <Crosshair size={13} className="text-slate-300 hover:text-blue-600 transition" title="پرش به موقعیت فرد در بوم" />
+                      {p.affected && (
+                        <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${
+                          isDark ? 'bg-rose-950 text-rose-300 border border-rose-800' : 'bg-rose-100 text-rose-700'
+                        }`}>
+                          مبتلا
+                        </span>
+                      )}
+                      {p.carrier && (
+                        <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${
+                          isDark ? 'bg-amber-950 text-amber-300 border border-amber-800' : 'bg-amber-100 text-amber-700'
+                        }`}>
+                          ناقل
+                        </span>
+                      )}
+                      <Crosshair size={13} className="text-slate-400 hover:text-blue-500 transition" title="پرش به موقعیت فرد در بوم" />
                     </div>
                   </div>
                 );
@@ -1253,30 +1622,105 @@ export default function GeneticPedigreeApp() {
 
           {/* Clinical Telemetry Grid */}
           <div className="grid grid-cols-2 gap-2 shrink-0">
-            <LabStat label="کل نمونه‌ها" value={stats.total} unit="نفر" color="slate" />
-            <LabStat label="عمق نسلی" value={stats.generations} unit="نسل" color="blue" />
-            <LabStat label="موارد فنوتیپ مثبت" value={stats.affected} unit="کیس" color="rose" />
-            <LabStat label="ناقلین هتروزیگوت" value={stats.carriers} unit="نفر" color="amber" />
+            <LabStat isDark={isDark} label="کل نمونه‌ها" value={stats.total} unit="نفر" color="slate" />
+            <LabStat isDark={isDark} label="عمق نسلی" value={stats.generations} unit="نسل" color="blue" />
+            <LabStat isDark={isDark} label="موارد فنوتیپ مثبت" value={stats.affected} unit="کیس" color="rose" />
+            <LabStat isDark={isDark} label="ناقلین هتروزیگوت" value={stats.carriers} unit="نفر" color="amber" />
           </div>
         </aside>
 
         {/* Center Stage: Millimeter Grid Canvas */}
-        <main className="flex min-w-0 flex-1 flex-col rounded-xl border border-slate-200 bg-white shadow-xs overflow-hidden">
-          <div ref={wrapRef} className="relative flex-1 overflow-hidden bg-slate-50">
+        <main className={`flex min-w-0 flex-1 flex-col rounded-2xl border shadow-xs overflow-hidden transition-colors ${
+          isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'
+        }`}>
+          <div ref={wrapRef} className={`relative flex-1 overflow-hidden ${
+            isDark ? 'bg-slate-950' : 'bg-slate-50'
+          }`}>
             {/* Technical HUD Controls */}
             <div data-ui className="absolute left-3 top-3 z-10 flex gap-1">
-              <LabIconBtn title="بزرگ‌نمایی" onClick={() => dispatch({ type: 'ZOOM', factor: 1.25 })}><Plus size={14} /></LabIconBtn>
-              <LabIconBtn title="کوچک‌نمایی" onClick={() => dispatch({ type: 'ZOOM', factor: 0.8 })}><Minus size={14} /></LabIconBtn>
-              <LabIconBtn title="کادربندی کامل (Fit View)" onClick={fitView}><Maximize2 size={14} /></LabIconBtn>
-              <LabIconBtn title="ریست نما به مختصات اولیه" onClick={() => dispatch({ type: 'RESET' })}><RotateCcw size={14} /></LabIconBtn>
-              <div className="flex items-center rounded-lg border border-slate-300 bg-white px-2.5 text-[11px] font-mono text-slate-600 shadow-sm">
+              <LabIconBtn isDark={isDark} title="بزرگ‌نمایی" onClick={() => dispatch({ type: 'ZOOM', factor: 1.25 })}><Plus size={14} /></LabIconBtn>
+              <LabIconBtn isDark={isDark} title="کوچک‌نمایی" onClick={() => dispatch({ type: 'ZOOM', factor: 0.8 })}><Minus size={14} /></LabIconBtn>
+              <LabIconBtn isDark={isDark} title="کادربندی کامل (Fit View)" onClick={fitView}><Maximize2 size={14} /></LabIconBtn>
+              <LabIconBtn isDark={isDark} title="ریست نما به مختصات اولیه" onClick={() => dispatch({ type: 'RESET' })}><RotateCcw size={14} /></LabIconBtn>
+              <LabIconBtn
+                isDark={isDark}
+                title={debugMode ? "غیرفعال‌سازی حالت عیب‌یابی کادرها" : "فعال‌سازی حالت عیب‌یابی کادرها و فواصل (Debug Mode)"}
+                ariaLabel="حالت عیب‌یابی کادرها و فواصل"
+                className={debugMode ? '!bg-amber-500 !border-amber-600 text-white shadow-sm' : ''}
+                onClick={() => setDebugMode((v) => !v)}>
+                <Bug size={14} />
+              </LabIconBtn>
+              <div className={`flex items-center rounded-lg border px-2.5 text-[11px] font-mono shadow-xs ${
+                isDark ? 'border-slate-700 bg-slate-800/90 text-slate-300' : 'border-slate-300 bg-white text-slate-600'
+              }`}>
                 ZOOM: {Math.round(state.zoom * 100)}%
               </div>
             </div>
 
-            {/* Clinical Nomenclature Legend */}
-            <div data-ui className="absolute bottom-3 left-3 z-10 rounded-lg border border-slate-200 bg-white/95 px-3 py-2 shadow-sm backdrop-blur-xs">
-              <ClinicalLegend />
+            {/* Debug Mode Diagnostic HUD Panel */}
+            {debugMode && (
+              <div
+                data-ui
+                dir="rtl"
+                className={`absolute bottom-16 left-3 z-20 w-80 rounded-2xl border p-3.5 shadow-xl backdrop-blur-md text-xs animate-in fade-in slide-in-from-bottom-2 ${
+                  isDark ? 'border-amber-500/40 bg-slate-900/95 text-slate-200' : 'border-amber-300 bg-white/95 text-slate-800'
+                }`}>
+                <div className={`flex items-center justify-between pb-2 border-b mb-2.5 ${isDark ? 'border-amber-900/40' : 'border-amber-100'}`}>
+                  <div className="flex items-center gap-1.5 font-bold text-amber-500">
+                    <span className="flex h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                    حالت عیب‌یابی کادرها و تداخلات
+                  </div>
+                  <button
+                    onClick={() => setDebugMode(false)}
+                    className="text-slate-400 hover:text-slate-200 rounded p-0.5 transition cursor-pointer"
+                    title="بستن پنل عیب‌یابی">
+                    <X size={13} />
+                  </button>
+                </div>
+
+                <div className="space-y-2 text-[11px]">
+                  <div className="flex justify-between items-center gap-2">
+                    <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>کادرهای افراد (Nodes):</span>
+                    <span className="font-mono font-bold text-sky-400 bg-sky-950/60 px-1.5 py-0.5 rounded border border-sky-800 text-[10px] whitespace-nowrap">
+                      {layout.debugBoxes?.nodes?.length ?? 0} کادر
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center gap-2">
+                    <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>راهروهای اتصالات:</span>
+                    <span className="font-mono font-bold text-indigo-400 bg-indigo-950/60 px-1.5 py-0.5 rounded border border-indigo-800 text-[10px] whitespace-nowrap">
+                      {layout.debugBoxes?.connectors?.length ?? 0} مسیر
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center gap-2">
+                    <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>وضعیت تداخلات (Collisions):</span>
+                    <span className="font-mono font-bold text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800 text-[10px] whitespace-nowrap">
+                      {layout.collisions?.finalCollisions === 0 ? '۰ تداخل (فاقد همپوشانی ✓)' : `${layout.collisions?.finalCollisions} تداخل`}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center gap-2">
+                    <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>گام‌های تراز دینامیک:</span>
+                    <span className="font-mono text-[10px]">{layout.collisions?.iterations ?? 1} گام</span>
+                  </div>
+                </div>
+
+                <div className={`mt-2.5 pt-2 border-t flex items-center justify-between ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
+                  <label className="flex items-center gap-1.5 text-[10px] text-slate-400 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={showClearance}
+                      onChange={(e) => setShowClearance(e.target.checked)}
+                      className="rounded border-slate-600 text-amber-500 focus:ring-amber-500"
+                    />
+                    نمایش حریم حداقل فاصله (Clearance)
+                  </label>
+                  <span className="text-[10px] text-slate-400 font-mono">104 / 80 / 82 px</span>
+                </div>
+              </div>
+            )}
+
+            {/* Standard Pedigree ACMG Nomenclature Collapsible Legend */}
+            <div data-ui className="absolute bottom-3 left-3 z-20">
+              <CollapsibleClinicalLegend isDark={isDark} defaultExpanded={false} />
             </div>
 
             {/* SVG Canvas with Millimeter Grid */}
@@ -1285,11 +1729,11 @@ export default function GeneticPedigreeApp() {
               onWheel={onWheel} onContextMenu={(e) => openMenu(e, null)}>
               <defs>
                 <pattern id="smallGrid" width="20" height="20" patternUnits="userSpaceOnUse">
-                  <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e2e8f0" strokeWidth="0.8" />
+                  <path d="M 20 0 L 0 0 0 20" fill="none" stroke={isDark ? "#172033" : "#e2e8f0"} strokeWidth="0.8" />
                 </pattern>
                 <pattern id="grid" width="100" height="100" patternUnits="userSpaceOnUse">
                   <rect width="100" height="100" fill="url(#smallGrid)" />
-                  <path d="M 100 0 L 0 0 0 100" fill="none" stroke="#cbd5e1" strokeWidth="1.2" />
+                  <path d="M 100 0 L 0 0 0 100" fill="none" stroke={isDark ? "#1e293b" : "#cbd5e1"} strokeWidth="1.2" />
                 </pattern>
               </defs>
 
@@ -1302,16 +1746,26 @@ export default function GeneticPedigreeApp() {
                   const romanNumerals = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX", "XX"];
                   const roman = romanNumerals[gIdx] || `G${gIdx + 1}`;
                   return (
-                    <g key={`gen-${gIdx}`} opacity={0.8} className="select-none pointer-events-none">
-                      <rect x={12} y={y - 12} width={68} height={24} rx={4} fill="#f1f5f9" stroke="#cbd5e1" strokeWidth={1} />
-                      <text x={46} y={y + 4} textAnchor="middle" fill="#334155" className="text-[10px] font-mono font-bold">
+                    <g key={`gen-${gIdx}`} opacity={0.85} className="select-none pointer-events-none">
+                      <rect x={12} y={y - 12} width={70} height={24} rx={6}
+                        fill={isDark ? "#1e293b" : "#f1f5f9"}
+                        stroke={isDark ? "#334155" : "#cbd5e1"}
+                        strokeWidth={1} />
+                      <text x={47} y={y + 4} textAnchor="middle"
+                        fill={isDark ? "#94a3b8" : "#334155"}
+                        className="text-[10px] font-mono font-bold">
                         {roman} ({gIdx + 1})
                       </text>
                     </g>
                   );
                 })}
 
-                <FamilyConnectors connectors={layout.connectors} />
+                <FamilyConnectors connectors={layout.connectors} isDark={isDark} />
+
+                {/* Debug Mode Bounding Boxes & Clearance Envelopes */}
+                {debugMode && (
+                  <DebugBoundingBoxesOverlay debugBoxes={layout.debugBoxes} showClearance={showClearance} />
+                )}
 
                 {people.map((p) => {
                   const pos = nodes[p.id]; if (!pos) return null;
@@ -1319,6 +1773,7 @@ export default function GeneticPedigreeApp() {
                   return (
                     <PersonNode key={p.id} person={p} pos={pos} riskAssessment={riskAssessment}
                       selected={state.selectedId === p.id}
+                      isDark={isDark}
                       onSelect={() => dispatch({ type: 'SELECT', id: p.id })}
                       onContextMenu={(e) => openMenu(e, p.id)} />
                   );
@@ -1328,21 +1783,37 @@ export default function GeneticPedigreeApp() {
 
             {/* Context Menu */}
             {menu.id !== null && (
-              <div className="absolute z-50 rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl text-xs w-48"
+              <div className={`absolute z-50 rounded-xl border p-1.5 shadow-2xl text-xs w-52 ${
+                isDark ? 'border-slate-800 bg-slate-900 text-slate-100' : 'border-slate-200 bg-white text-slate-800'
+              }`}
                 style={{ left: menu.x, top: menu.y }} onMouseLeave={() => setMenu({ x: 0, y: 0, id: null })}>
-                <div className="border-b border-slate-100 px-2 py-1 text-[10px] font-mono font-bold text-slate-400">
+                <div className={`border-b px-2.5 py-1 text-[10px] font-mono font-bold ${isDark ? 'border-slate-800 text-slate-400' : 'border-slate-100 text-slate-400'}`}>
                   عملیات خویشاوندی
                 </div>
                 <div className="py-1 space-y-0.5">
-                  <button className="flex w-full items-center justify-between rounded px-2 py-1.5 text-right hover:bg-slate-50 text-indigo-700 font-medium" onClick={() => { addRelative('twin_identical', menu.id); setMenu({ x: 0, y: 0, id: null }); }}>افزودن قل همسان (MZ) <Plus size={12} className="text-indigo-600" /></button>
-                  <button className="flex w-full items-center justify-between rounded px-2 py-1.5 text-right hover:bg-slate-50 text-sky-700 font-medium" onClick={() => { addRelative('twin_fraternal', menu.id); setMenu({ x: 0, y: 0, id: null }); }}>افزودن قل ناهمسان (DZ) <Plus size={12} className="text-sky-600" /></button>
-                  <div className="my-1 border-t border-slate-100" />
-                  <button className="flex w-full items-center justify-between rounded px-2 py-1.5 text-right hover:bg-slate-50" onClick={() => { addRelative('mother', menu.id); setMenu({ x: 0, y: 0, id: null }); }}>افزودن مادر (والد مونث) <Plus size={12} className="text-slate-400" /></button>
-                  <button className="flex w-full items-center justify-between rounded px-2 py-1.5 text-right hover:bg-slate-50" onClick={() => { addRelative('father', menu.id); setMenu({ x: 0, y: 0, id: null }); }}>افزودن پدر (والد مذکر) <Plus size={12} className="text-slate-400" /></button>
-                  <button className="flex w-full items-center justify-between rounded px-2 py-1.5 text-right hover:bg-slate-50" onClick={() => { addRelative('spouse', menu.id); setMenu({ x: 0, y: 0, id: null }); }}>افزودن همسر <Plus size={12} className="text-slate-400" /></button>
-                  <button className="flex w-full items-center justify-between rounded px-2 py-1.5 text-right hover:bg-slate-50" onClick={() => { addRelative('child', menu.id); setMenu({ x: 0, y: 0, id: null }); }}>افزودن فرزند <Plus size={12} className="text-slate-400" /></button>
-                  <div className="my-1 border-t border-slate-100" />
-                  <button className="flex w-full items-center justify-between rounded px-2 py-1.5 text-right text-rose-600 hover:bg-rose-50" onClick={() => { setDeleteConfirmId(menu.id); setMenu({ x: 0, y: 0, id: null }); }}>حذف این پرونده <Trash2 size={12} /></button>
+                  <button className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-right hover:bg-indigo-500/10 text-indigo-400 font-medium" onClick={() => { addRelative('twin_identical', menu.id); setMenu({ x: 0, y: 0, id: null }); }}>
+                    افزودن قل همسان (MZ) <Plus size={12} className="text-indigo-400" />
+                  </button>
+                  <button className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-right hover:bg-sky-500/10 text-sky-400 font-medium" onClick={() => { addRelative('twin_fraternal', menu.id); setMenu({ x: 0, y: 0, id: null }); }}>
+                    افزودن قل ناهمسان (DZ) <Plus size={12} className="text-sky-400" />
+                  </button>
+                  <div className={`my-1 border-t ${isDark ? 'border-slate-800' : 'border-slate-100'}`} />
+                  <button className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-right transition ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-50'}`} onClick={() => { addRelative('mother', menu.id); setMenu({ x: 0, y: 0, id: null }); }}>
+                    افزودن مادر (والد مونث) <Plus size={12} className="text-slate-400" />
+                  </button>
+                  <button className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-right transition ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-50'}`} onClick={() => { addRelative('father', menu.id); setMenu({ x: 0, y: 0, id: null }); }}>
+                    افزودن پدر (والد مذکر) <Plus size={12} className="text-slate-400" />
+                  </button>
+                  <button className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-right transition ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-50'}`} onClick={() => { addRelative('spouse', menu.id); setMenu({ x: 0, y: 0, id: null }); }}>
+                    افزودن همسر <Plus size={12} className="text-slate-400" />
+                  </button>
+                  <button className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-right transition ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-50'}`} onClick={() => { addRelative('child', menu.id); setMenu({ x: 0, y: 0, id: null }); }}>
+                    افزودن فرزند <Plus size={12} className="text-slate-400" />
+                  </button>
+                  <div className={`my-1 border-t ${isDark ? 'border-slate-800' : 'border-slate-100'}`} />
+                  <button className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-right text-rose-500 hover:bg-rose-500/10" onClick={() => { setDeleteConfirmId(menu.id); setMenu({ x: 0, y: 0, id: null }); }}>
+                    حذف این پرونده <Trash2 size={12} />
+                  </button>
                 </div>
               </div>
             )}
@@ -1351,78 +1822,103 @@ export default function GeneticPedigreeApp() {
 
         {/* Right Clinical Sidebar: Diagnostic Inspector */}
         <aside className="flex w-80 shrink-0 flex-col gap-3">
-          <div className="scroll-lab flex min-h-0 flex-1 flex-col overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+          <div className={`scroll-lab flex min-h-0 flex-1 flex-col overflow-y-auto rounded-2xl border p-4 shadow-xs transition ${
+            isDark ? 'border-slate-800 bg-slate-900/90 text-slate-100' : 'border-slate-200 bg-white text-slate-900'
+          }`}>
             {selected ? (
               <div className="space-y-4">
                 {/* Header Profile */}
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className={`flex items-center justify-between border-b pb-3 ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
                   <div className="flex items-center gap-2.5">
-                    <MiniGlyph person={selected} size={24} />
+                    <MiniGlyph person={selected} size={26} isDark={isDark} />
                     <div>
-                      <h2 className="text-sm font-bold text-slate-900 truncate">{selected.name || 'بی‌نام'}</h2>
+                      <h2 className="text-sm font-bold truncate flex items-center gap-1.5">
+                        <span>{selected.name || 'بی‌نام'}</span>
+                        {selected.isProband && (
+                          <span className="rounded bg-blue-500/20 text-blue-400 text-[10px] px-1.5 py-0.2 font-mono">PROBAND</span>
+                        )}
+                      </h2>
                       <div className="text-[10px] font-mono text-slate-400">ID: {selected.id}</div>
                     </div>
                   </div>
-                  <LabIconBtn title="حذف پرونده" className="text-rose-600 hover:bg-rose-50 border-rose-200" onClick={() => setDeleteConfirmId(selected.id)}>
+                  <LabIconBtn isDark={isDark} title="حذف پرونده" className="text-rose-500 hover:bg-rose-500/10" onClick={() => setDeleteConfirmId(selected.id)}>
                     <Trash2 size={14} />
                   </LabIconBtn>
                 </div>
 
                 {/* Case Name Input */}
                 <div>
-                  <label className="mb-1 block text-[11px] font-medium text-slate-500">نام یا کد بیمار / پروباند</label>
+                  <label className={`mb-1 block text-[11px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>نام یا کد بیمار / پروباند</label>
                   <input value={selected.name || ''} onChange={(e) => dispatch({ type: 'UPDATE', id: selected.id, patch: { name: e.target.value } })}
-                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs outline-none focus:border-blue-500 focus:bg-white transition" />
+                    className={`w-full rounded-xl border px-3 py-1.5 text-xs outline-none transition ${
+                      isDark
+                        ? 'border-slate-700 bg-slate-950 text-slate-100 focus:border-blue-500'
+                        : 'border-slate-200 bg-slate-50 text-slate-800 focus:border-blue-500 focus:bg-white'
+                    }`} />
                 </div>
 
                 {/* Biological Sex */}
                 <div>
-                  <label className="mb-1 block text-[11px] font-medium text-slate-500">جنسیت بیولوژیک</label>
-                  <Segmented value={selected.sex} onChange={(v) => dispatch({ type: 'UPDATE', id: selected.id, patch: { sex: v } })}
+                  <label className={`mb-1 block text-[11px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>جنسیت بیولوژیک</label>
+                  <Segmented isDark={isDark} value={selected.sex} onChange={(v) => dispatch({ type: 'UPDATE', id: selected.id, patch: { sex: v } })}
                     options={[{ value: 'male', label: 'مرد (XY)' }, { value: 'female', label: 'زن (XX)' }, { value: 'unknown', label: 'نامشخص' }]} />
                 </div>
 
-                {/* Clinical Phenotype Status */}
+                {/* Clinical Phenotype Status & Proband designation */}
                 <div>
-                  <label className="mb-1.5 block text-[11px] font-medium text-slate-500">وضعیت بالینی و ژنتیکی</label>
+                  <label className={`mb-1.5 block text-[11px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>وضعیت بالینی و تشخیصی</label>
                   <div className="grid grid-cols-2 gap-2">
-                    <LabToggle label="مبتلا به بیماری" checked={!!selected.affected} onChange={(v) => dispatch({ type: 'UPDATE', id: selected.id, patch: { affected: v } })} />
-                    <LabToggle label="ناقل جهش ژنی" checked={!!selected.carrier} onChange={(v) => dispatch({ type: 'UPDATE', id: selected.id, patch: { carrier: v } })} />
-                    <LabToggle label="جهش تاییدشده" checked={!!selected.hasMutation} onChange={(v) => dispatch({ type: 'UPDATE', id: selected.id, patch: { hasMutation: v } })} />
-                    <LabToggle label="متوفی" checked={!!selected.deceased} onChange={(v) => dispatch({ type: 'UPDATE', id: selected.id, patch: { deceased: v } })} />
+                    <LabToggle isDark={isDark} label="مبتلا به بیماری" checked={!!selected.affected} onChange={(v) => dispatch({ type: 'UPDATE', id: selected.id, patch: { affected: v } })} />
+                    <LabToggle isDark={isDark} label="ناقل جهش ژنی" checked={!!selected.carrier} onChange={(v) => dispatch({ type: 'UPDATE', id: selected.id, patch: { carrier: v } })} />
+                    <LabToggle isDark={isDark} label="جهش تاییدشده" checked={!!selected.hasMutation} onChange={(v) => dispatch({ type: 'UPDATE', id: selected.id, patch: { hasMutation: v } })} />
+                    <LabToggle isDark={isDark} label="پروباند (P ↗)" checked={!!selected.isProband} onChange={(v) => dispatch({ type: 'UPDATE', id: selected.id, patch: { isProband: v } })} />
+                    <LabToggle isDark={isDark} label="متوفی" checked={!!selected.deceased} onChange={(v) => dispatch({ type: 'UPDATE', id: selected.id, patch: { deceased: v } })} />
                   </div>
                 </div>
 
                 {/* Clinical Ages */}
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <div>
-                    <label className="mb-1 block text-[11px] font-medium text-slate-500">سن شروع بیماری</label>
-                    <input type="number" value={selected.diseaseOnsetAge ?? ''} onChange={(e) => dispatch({ type: 'UPDATE', id: selected.id, patch: { diseaseOnsetAge: e.target.value ? Number(e.target.value) : null } })}
-                      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs outline-none focus:border-blue-500 focus:bg-white transition font-mono" />
+                    <label className={`mb-1 block text-[10px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>سن فعلی</label>
+                    <input type="number" value={selected.age ?? ''} onChange={(e) => dispatch({ type: 'UPDATE', id: selected.id, patch: { age: e.target.value ? Number(e.target.value) : null } })}
+                      className={`w-full rounded-xl border px-2.5 py-1.5 text-xs outline-none transition font-mono ${
+                        isDark ? 'border-slate-700 bg-slate-950 text-slate-100' : 'border-slate-200 bg-slate-50 text-slate-800'
+                      }`} />
                   </div>
                   <div>
-                    <label className="mb-1 block text-[11px] font-medium text-slate-500">سن فوت</label>
+                    <label className={`mb-1 block text-[10px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>سن شروع</label>
+                    <input type="number" value={selected.diseaseOnsetAge ?? ''} onChange={(e) => dispatch({ type: 'UPDATE', id: selected.id, patch: { diseaseOnsetAge: e.target.value ? Number(e.target.value) : null } })}
+                      className={`w-full rounded-xl border px-2.5 py-1.5 text-xs outline-none transition font-mono ${
+                        isDark ? 'border-slate-700 bg-slate-950 text-slate-100' : 'border-slate-200 bg-slate-50 text-slate-800'
+                      }`} />
+                  </div>
+                  <div>
+                    <label className={`mb-1 block text-[10px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>سن فوت</label>
                     <input type="number" value={selected.deathAge ?? ''} onChange={(e) => dispatch({ type: 'UPDATE', id: selected.id, patch: { deathAge: e.target.value ? Number(e.target.value) : null } })}
-                      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs outline-none focus:border-blue-500 focus:bg-white transition font-mono" />
+                      className={`w-full rounded-xl border px-2.5 py-1.5 text-xs outline-none transition font-mono ${
+                        isDark ? 'border-slate-700 bg-slate-950 text-slate-100' : 'border-slate-200 bg-slate-50 text-slate-800'
+                      }`} />
                   </div>
                 </div>
 
                 {/* Twin Zygosity */}
                 <div>
-                  <label className="mb-1 block text-[11px] font-medium text-slate-500">نوع تولد / دوقلو (Zygosity)</label>
-                  <Segmented value={selected.twinType || 'none'} onChange={(v) => dispatch({ type: 'UPDATE', id: selected.id, patch: { twinType: v } })}
-                    options={[{ value: 'none', label: 'تک‌تولد' }, { value: 'identical', label: 'همسان (MZ)' }, { value: 'fraternal', label: 'ناهمسان (DZ)' }, { value: 'unknown', label: 'نامشخص (?)' }]} />
+                  <label className={`mb-1 block text-[11px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>نوع تولد / دوقلو (Zygosity)</label>
+                  <Segmented isDark={isDark} value={selected.twinType || 'none'} onChange={(v) => dispatch({ type: 'UPDATE', id: selected.id, patch: { twinType: v } })}
+                    options={[{ value: 'none', label: 'تک‌تولد' }, { value: 'identical', label: 'همسان (MZ)' }, { value: 'fraternal', label: 'ناهمسان (DZ)' }, { value: 'unknown', label: 'نامشخص' }]} />
 
                   {/* Twin partner indicator & unlink */}
                   {selected.twinGroupId && (
-                    <div className="mt-2 flex items-center justify-between rounded-lg border border-indigo-200 bg-indigo-50/70 p-2 text-xs">
-                      <div className="flex items-center gap-1.5 text-indigo-900 font-medium min-w-0">
-                        <GitFork size={13} className="text-indigo-600 shrink-0" />
+                    <div className={`mt-2 flex items-center justify-between rounded-xl border p-2 text-xs ${
+                      isDark ? 'border-indigo-800/60 bg-indigo-950/40 text-indigo-300' : 'border-indigo-200 bg-indigo-50/70 text-indigo-900'
+                    }`}>
+                      <div className="flex items-center gap-1.5 font-medium min-w-0">
+                        <GitFork size={13} className="text-indigo-400 shrink-0" />
                         <span className="truncate">
                           قل متناظر: <strong>{people.filter((p) => p.twinGroupId === selected.twinGroupId && p.id !== selected.id).map((p) => p.name).join('، ') || 'یافت نشد'}</strong>
                         </span>
                       </div>
-                      <button type="button" onClick={() => dispatch({ type: 'UNLINK_TWIN', id: selected.id })} className="shrink-0 text-[10px] text-rose-600 hover:underline">
+                      <button type="button" onClick={() => dispatch({ type: 'UNLINK_TWIN', id: selected.id })} className="shrink-0 text-[10px] text-rose-500 hover:underline">
                         انفصال
                       </button>
                     </div>
@@ -1434,13 +1930,15 @@ export default function GeneticPedigreeApp() {
                     if (!sibCandidates.length) return null;
                     return (
                       <div className="mt-2 space-y-1">
-                        <div className="text-[10px] text-slate-500">پیوند با خواهر/برادر به عنوان دوقلو:</div>
+                        <div className="text-[10px] text-slate-400">پیوند با خواهر/برادر به عنوان دوقلو:</div>
                         <div className="flex gap-1.5">
-                          <select id="linkSibSelect" className="flex-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs">
+                          <select id="linkSibSelect" className={`flex-1 rounded-lg border px-2 py-1 text-xs ${
+                            isDark ? 'border-slate-700 bg-slate-950 text-slate-100' : 'border-slate-200 bg-slate-50 text-slate-800'
+                          }`}>
                             <option value="">انتخاب خواهر یا برادر...</option>
                             {sibCandidates.map((s) => (<option key={s.id} value={s.id}>{s.name} ({s.sex === 'male' ? 'برادر' : 'خواهر'})</option>))}
                           </select>
-                          <LabBtn onClick={() => {
+                          <LabBtn isDark={isDark} onClick={() => {
                             const sel = document.getElementById('linkSibSelect');
                             if (sel?.value) {
                               dispatch({ type: 'LINK_TWINS', id1: selected.id, id2: sel.value, zygosity: selected.twinType !== 'none' ? selected.twinType : 'identical' });
@@ -1457,41 +1955,47 @@ export default function GeneticPedigreeApp() {
 
                 {/* Upgraded Mendelian Educational Risk Panel */}
                 {selectedRisk && (
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
-                    <div className="flex items-center justify-between border-b border-slate-200/60 pb-1.5">
+                  <div className={`rounded-xl border p-3.5 space-y-2.5 ${
+                    isDark ? 'border-slate-800 bg-slate-950/60' : 'border-slate-200 bg-slate-50'
+                  }`}>
+                    <div className={`flex items-center justify-between border-b pb-2 ${isDark ? 'border-slate-800' : 'border-slate-200/60'}`}>
                       <div className="flex items-center gap-1.5">
-                        <Dna size={14} className="text-blue-600" />
-                        <span className="text-[11px] font-bold text-slate-700">ارزیابی ژنتیک مندلی (آموزشی)</span>
+                        <Dna size={14} className="text-blue-500" />
+                        <span className="text-[11px] font-bold">ارزیابی ژنتیک مندلی (آموزشی)</span>
                       </div>
-                      <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[9px] font-mono font-bold text-blue-800">
+                      <span className={`rounded-md px-1.5 py-0.5 text-[9px] font-mono font-bold ${
+                        isDark ? 'bg-blue-950 text-blue-300 border border-blue-800' : 'bg-blue-100 text-blue-800'
+                      }`}>
                         {selectedRisk.model === INHERITANCE_MODELS.AUTOSOMAL_RECESSIVE ? 'اتوزوم مغلوب' : selectedRisk.model === INHERITANCE_MODELS.AUTOSOMAL_DOMINANT ? 'اتوزوم غالب' : 'وابسته به X'}
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between bg-white rounded-md p-2 border border-slate-200/80">
-                      <span className="text-[11px] font-medium text-slate-600">برآورد احتمال ناقل بودن:</span>
+                    <div className={`flex items-center justify-between rounded-lg p-2.5 border ${
+                      isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200/80'
+                    }`}>
+                      <span className={`text-[11px] font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>برآورد احتمال ناقل بودن:</span>
                       <span className={`text-xs font-bold font-mono ${
                         selectedRisk.status === RISK_STATUS.AFFECTED
-                          ? 'text-rose-600'
+                          ? 'text-rose-500'
                           : selectedRisk.status === RISK_STATUS.OBLIGATE_CARRIER
-                          ? 'text-emerald-700'
+                          ? 'text-emerald-500'
                           : selectedRisk.status === RISK_STATUS.CONDITIONAL_CARRIER
-                          ? 'text-blue-700'
-                          : 'text-slate-500'
+                          ? 'text-blue-500'
+                          : 'text-slate-400'
                       }`}>
                         {selectedRisk.probabilityDisplay}
                       </span>
                     </div>
 
-                    <p className="text-[10px] leading-relaxed text-slate-600">
+                    <p className={`text-[10px] leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                       {selectedRisk.reason}
                     </p>
 
                     {/* Educational assumptions */}
                     {selectedRisk.assumptions.length > 0 && (
-                      <div className="pt-1 border-t border-slate-200/50">
+                      <div className={`pt-1.5 border-t ${isDark ? 'border-slate-800' : 'border-slate-200/50'}`}>
                         <div className="text-[9px] font-bold text-slate-400 mb-1">فرضیات محاسباتی:</div>
-                        <ul className="text-[9px] text-slate-500 list-disc list-inside space-y-0.5">
+                        <ul className="text-[9px] text-slate-400 list-disc list-inside space-y-0.5">
                           {selectedRisk.assumptions.slice(0, 2).map((asm, idx) => (
                             <li key={idx} className="truncate">{asm}</li>
                           ))}
@@ -1500,7 +2004,9 @@ export default function GeneticPedigreeApp() {
                     )}
 
                     {/* Mandatory Non-Diagnostic Disclaimer */}
-                    <div className="rounded bg-amber-50 border border-amber-200/70 p-2 text-[9px] text-amber-800 leading-normal">
+                    <div className={`rounded-lg border p-2 text-[9px] leading-normal ${
+                      isDark ? 'bg-amber-950/30 border-amber-900/40 text-amber-300' : 'bg-amber-50 border-amber-200/70 text-amber-800'
+                    }`}>
                       ⚠️ <strong>سلب مسئولیت آموزشی:</strong> {CLINICAL_DISCLAIMER_FA}
                     </div>
                   </div>
@@ -1508,25 +2014,27 @@ export default function GeneticPedigreeApp() {
 
                 {/* Kinship Operations */}
                 <div>
-                  <label className="mb-1.5 block text-[11px] font-medium text-slate-500">افزودن بستگان و اتصالات ژنتیکی</label>
+                  <label className={`mb-1.5 block text-[11px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>افزودن بستگان و اتصالات ژنتیکی</label>
                   <div className="grid grid-cols-2 gap-1.5">
-                    <LabBtn onClick={() => addRelative('mother', selected.id)}><Plus size={12} /> والد مونث</LabBtn>
-                    <LabBtn onClick={() => addRelative('father', selected.id)}><Plus size={12} /> والد مذکر</LabBtn>
-                    <LabBtn onClick={() => addRelative('spouse', selected.id)}><Plus size={12} /> همسر</LabBtn>
-                    <LabBtn onClick={() => addRelative('child', selected.id)}><Plus size={12} /> فرزند</LabBtn>
-                    <LabBtn onClick={() => addRelative('twin_identical', selected.id)} className="bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100"><Plus size={12} /> قل همسان (MZ)</LabBtn>
-                    <LabBtn onClick={() => addRelative('twin_fraternal', selected.id)} className="bg-sky-50 border-sky-200 text-sky-700 hover:bg-sky-100"><Plus size={12} /> قل ناهمسان (DZ)</LabBtn>
+                    <LabBtn isDark={isDark} onClick={() => addRelative('mother', selected.id)}><Plus size={12} /> والد مونث</LabBtn>
+                    <LabBtn isDark={isDark} onClick={() => addRelative('father', selected.id)}><Plus size={12} /> والد مذکر</LabBtn>
+                    <LabBtn isDark={isDark} onClick={() => addRelative('spouse', selected.id)}><Plus size={12} /> همسر</LabBtn>
+                    <LabBtn isDark={isDark} onClick={() => addRelative('child', selected.id)}><Plus size={12} /> فرزند</LabBtn>
+                    <LabBtn isDark={isDark} onClick={() => addRelative('twin_identical', selected.id)} className={isDark ? 'bg-indigo-950/40 border-indigo-800 text-indigo-300' : 'bg-indigo-50 border-indigo-200 text-indigo-700'}><Plus size={12} /> قل همسان (MZ)</LabBtn>
+                    <LabBtn isDark={isDark} onClick={() => addRelative('twin_fraternal', selected.id)} className={isDark ? 'bg-sky-950/40 border-sky-800 text-sky-300' : 'bg-sky-50 border-sky-200 text-sky-700'}><Plus size={12} /> قل ناهمسان (DZ)</LabBtn>
                   </div>
                 </div>
               </div>
             ) : (
               <div className="flex h-full flex-col items-center justify-center gap-3 text-center p-4">
-                <div className="grid h-12 w-12 place-items-center rounded-xl bg-slate-100 text-slate-400">
+                <div className={`grid h-12 w-12 place-items-center rounded-2xl ${
+                  isDark ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-400'
+                }`}>
                   <Activity size={24} />
                 </div>
                 <div>
-                  <h3 className="text-xs font-bold text-slate-700">هیچ نمونه‌ای انتخاب نشده است</h3>
-                  <p className="mt-1 text-[11px] text-slate-400 leading-relaxed">
+                  <h3 className={`text-xs font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>هیچ نمونه‌ای انتخاب نشده است</h3>
+                  <p className={`mt-1 text-[11px] leading-relaxed ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                     روی هر فرد در نمودار یا فهرست نمونه‌ها کلیک کنید تا پرونده و مشخصات ژنتیکی وی نمایش داده شود.
                   </p>
                 </div>

@@ -1,9 +1,11 @@
-// pedigreeLayout.js - High-Performance Scalable Genetic Pedigree Layout Engine
+// pedigreeLayout.js - High-Precision Scalable Genetic Pedigree Layout Engine
 // Tested up to 50+ generations and 1000+ nodes.
-// Features: Memoized ancestor tracking, collision-free interval scheduling for sibships,
-// multi-spouse remarriages, consanguinity double lines, twins support, and call-stack-safe math.
+// Features: Contour-based subtree bounding, zero-drift symmetrical centering,
+// collision-free interval scheduling for sibships, multi-spouse remarriages,
+// consanguinity double lines with collision avoidance, twins support (MZ/DZ/unknown),
+// and call-stack-safe math.
 
-const DEFAULTS = {
+export const DEFAULTS = {
   nodeGap: 104,
   coupleGap: 80,
   twinGap: 82,
@@ -13,11 +15,13 @@ const DEFAULTS = {
   busYFactor: 0.52,
 };
 
-const EMPTY_LAYOUT = {
+export const EMPTY_LAYOUT = {
   nodes: {},
   connectors: { mating: [], drop: [], sibship: [], childLink: [], longEdge: [], twinBars: [], twinMarks: [] },
   generations: {},
   bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0, width: 0, height: 0 },
+  collisions: { detected: 0, resolved: true, remaining: 0, details: [] },
+  debugBoxes: { nodes: [], connectors: [] },
 };
 
 // ---------------- Call-Stack Safe Min/Max Helpers ----------------
@@ -192,7 +196,7 @@ function assignGenerations(ids, people, families, getAncestors) {
   const groupLayer = new Map();
   allGroups.forEach((g) => groupLayer.set(g, 0));
 
-  const maxIters = Math.min(allGroups.length + 2, 65);
+  const maxIters = Math.min(allGroups.length + 2, 70);
   for (let it = 0; it < maxIters; it++) {
     let changed = false;
     for (const [gp, children] of groupEdges) {
@@ -215,7 +219,7 @@ function assignGenerations(ids, people, families, getAncestors) {
   return layerOf;
 }
 
-// ---------------- Stage 4: Multi-Spouse & Twin Clusters ----------------
+// ---------------- Stage 4: Sibling & Multi-Spouse Cluster Grouping ----------------
 function buildLayerClusters(people, ids, families, layerOf, familyOfOrigin) {
   const layerMap = {};
   ids.forEach((id) => {
@@ -311,7 +315,7 @@ function buildLayerClusters(people, ids, families, layerOf, familyOfOrigin) {
   return { layerBlocks, blockOf };
 }
 
-// ---------------- Stage 5: Layer Ordering with Barycenter ----------------
+// ---------------- Stage 5: Layer Ordering (Barycentric & Sibling Coherence) ----------------
 function orderLayers(people, ids, families, layerOf, { layerBlocks }) {
   const layerNums = Object.keys(layerBlocks).map(Number).sort((a, b) => a - b);
   const orderedLayers = {};
@@ -340,7 +344,7 @@ function orderLayers(people, ids, families, layerOf, { layerBlocks }) {
     orderedLayers[L] = list;
   });
 
-  // Barycenter sweeps
+  // Barycenter sweeps to reduce edge crossings
   const posMap = {};
   const updatePosMap = () => {
     layerNums.forEach((L) => {
@@ -351,7 +355,7 @@ function orderLayers(people, ids, families, layerOf, { layerBlocks }) {
   };
   updatePosMap();
 
-  const sweepsCount = Math.min(6, Math.max(3, Math.floor(50 / Math.max(layerNums.length, 1))));
+  const sweepsCount = Math.min(4, Math.max(2, Math.floor(30 / Math.max(layerNums.length, 1))));
   for (let sweep = 0; sweep < sweepsCount; sweep++) {
     const useDown = sweep % 2 === 0;
     const seq = useDown ? layerNums : [...layerNums].reverse();
@@ -387,36 +391,65 @@ function orderLayers(people, ids, families, layerOf, { layerBlocks }) {
   return { orderedLayers, layerNums };
 }
 
-// ---------------- Stage 6: Coordinate Assignment with Hierarchical Centering ----------------
-function computeSubtreeWidths(ids, people, opt) {
-  const widthOf = {};
-  function getW(id, visited = new Set()) {
-    if (!id || !people[id] || visited.has(id)) return opt.nodeGap;
-    if (widthOf[id]) return widthOf[id];
-    visited.add(id);
-    const p = people[id];
-    const cIds = p.childIds || [];
-    if (!cIds.length) {
-      widthOf[id] = opt.nodeGap;
-      return opt.nodeGap;
-    }
-    let totalCWidth = 0;
-    cIds.forEach((cid) => {
-      totalCWidth += getW(cid, visited);
-    });
-    const hasSpouse = (p.spouseIds || []).length > 0;
-    const minW = hasSpouse ? opt.nodeGap + opt.coupleGap : opt.nodeGap;
-    widthOf[id] = Math.max(minW, totalCWidth);
-    return widthOf[id];
-  }
-  ids.forEach((id) => getW(id));
-  return widthOf;
+// ---------------- Stage 6: Contour-Based Subtree Placement (Zero Drift & Non-Overlapping) ----------------
+
+/**
+ * Creates and updates horizontal bounding contours per generation layer.
+ * A contour is a Map of layer -> { min: number, max: number }
+ */
+function createContour() {
+  return new Map();
 }
 
-function assignCoordinates(people, families, familyOfOrigin, { orderedLayers, layerNums }, opt) {
+function cloneContour(c) {
+  const next = new Map();
+  for (const [L, span] of c) {
+    next.set(L, { min: span.min, max: span.max });
+  }
+  return next;
+}
+
+function shiftContour(c, dx) {
+  for (const [, span] of c) {
+    span.min += dx;
+    span.max += dx;
+  }
+}
+
+function mergeContours(target, source) {
+  for (const [L, span] of source) {
+    if (!target.has(L)) {
+      target.set(L, { min: span.min, max: span.max });
+    } else {
+      const t = target.get(L);
+      if (span.min < t.min) t.min = span.min;
+      if (span.max > t.max) t.max = span.max;
+    }
+  }
+}
+
+function computeContourSeparation(cLeft, cRight, minGap = 104) {
+  let maxOverlap = -Infinity;
+  let hasOverlap = false;
+
+  for (const [L, leftSpan] of cLeft) {
+    if (cRight.has(L)) {
+      const rightSpan = cRight.get(L);
+      const neededShift = (leftSpan.max + minGap) - rightSpan.min;
+      if (neededShift > maxOverlap) {
+        maxOverlap = neededShift;
+      }
+      hasOverlap = true;
+    }
+  }
+
+  if (!hasOverlap) return minGap;
+  return Math.max(minGap, maxOverlap);
+}
+
+function assignCoordinates(people, families, familyOfOrigin, { orderedLayers, layerNums }, layerOf, opt) {
   const x = {};
-  const allIds = Object.keys(people);
-  const widthOf = computeSubtreeWidths(allIds, people, opt);
+  const assigned = new Set();
 
   const getSpacing = (p1, p2) => {
     if (!p1 || !p2) return opt.nodeGap;
@@ -428,142 +461,529 @@ function assignCoordinates(people, families, familyOfOrigin, { orderedLayers, la
       if (t1 && t1 !== 'none' && t2 && t2 !== 'none' && t1 === t2) {
         return opt.twinGap;
       }
-      const w1 = widthOf[p1] || opt.nodeGap;
-      const w2 = widthOf[p2] || opt.nodeGap;
-      return Math.max(opt.nodeGap, (w1 + w2) / 2);
+      return opt.nodeGap;
     }
-    const w1 = widthOf[p1] || opt.nodeGap;
-    const w2 = widthOf[p2] || opt.nodeGap;
-    return Math.max(opt.nodeGap * 1.25, (w1 + w2) / 2 + 16);
+    return opt.nodeGap;
   };
 
-  // Initial horizontal placement per layer
+  // Find root individuals (individuals without parents in the dataset)
+  const isRoot = (id) => !familyOfOrigin[id] || !familyOfOrigin[id].parents.length;
+  const rootIds = Object.keys(people).filter(isRoot);
+
+  // Helper to shift a placed subtree by delta
+  const shiftSubtree = (nodeId, dx, visited = new Set()) => {
+    if (!nodeId || visited.has(nodeId)) return;
+    visited.add(nodeId);
+    if (x[nodeId] !== undefined) x[nodeId] += dx;
+
+    // Shift spouses placed with this node
+    (people[nodeId].spouseIds || []).forEach((sid) => {
+      if (!visited.has(sid) && x[sid] !== undefined) {
+        visited.add(sid);
+        x[sid] += dx;
+      }
+    });
+
+    // Shift children
+    (people[nodeId].childIds || []).forEach((cid) => {
+      shiftSubtree(cid, dx, visited);
+    });
+  };
+
+  /**
+   * Recursively lays out a family branch bottom-up and returns its bounding contour.
+   */
+  const layoutBranch = (nodeId, visited = new Set()) => {
+    if (!nodeId || !people[nodeId] || visited.has(nodeId)) {
+      return { contour: createContour(), anchorX: 0 };
+    }
+    visited.add(nodeId);
+    const p = people[nodeId];
+    const pLayer = layerNums.find((L) => orderedLayers[L]?.includes(nodeId)) ?? 0;
+
+    // Check spouses in same generation
+    const spouses = (p.spouseIds || []).filter((sid) => people[sid] && !visited.has(sid));
+    spouses.forEach((sid) => visited.add(sid));
+
+    // Determine children produced with all spouses
+    const rawChildren = [...new Set([...(p.childIds || [])])].filter((cid) => people[cid]);
+
+    // Keep twins grouped, but balance leaf siblings symmetrically around reproducing branches to eliminate diagonal drift
+    const hasDescendants = (cid) => (people[cid]?.childIds || []).some((k) => people[k]);
+    const isTwin = (cid) => Boolean(people[cid]?.twinType && people[cid].twinType !== 'none');
+
+    let children = rawChildren;
+    const reproducing = rawChildren.filter(hasDescendants);
+    const nonReproducing = rawChildren.filter((cid) => !hasDescendants(cid) && !isTwin(cid));
+    const twins = rawChildren.filter(isTwin);
+
+    if (reproducing.length > 0 && nonReproducing.length > 0 && twins.length === 0) {
+      const half = Math.floor(nonReproducing.length / 2);
+      const leftLeaves = nonReproducing.slice(0, half);
+      const rightLeaves = nonReproducing.slice(half);
+      children = [...leftLeaves, ...reproducing, ...rightLeaves];
+    }
+
+    // If leaf node (no children)
+    if (children.length === 0) {
+      const contour = createContour();
+      x[nodeId] = 0;
+      assigned.add(nodeId);
+      let minSpanX = -opt.nodeRadius;
+      let maxSpanX = opt.nodeRadius;
+
+      if (spouses.length > 0) {
+        spouses.forEach((sid, sIdx) => {
+          const spX = (sIdx + 1) * opt.coupleGap;
+          x[sid] = spX;
+          assigned.add(sid);
+          maxSpanX = spX + opt.nodeRadius;
+        });
+      }
+
+      contour.set(pLayer, { min: minSpanX, max: maxSpanX });
+      return { contour, anchorX: (minSpanX + maxSpanX) / 2 };
+    }
+
+    // Has children: recursively lay out each child's sub-branch
+    const childBranches = [];
+    children.forEach((cid) => {
+      if (!visited.has(cid)) {
+        const branch = layoutBranch(cid, visited);
+        childBranches.push({ id: cid, ...branch });
+      }
+    });
+
+    // Place children side by side using contour separation
+    const combinedChildContour = createContour();
+    let prevBranch = null;
+
+    childBranches.forEach((currBranch, idx) => {
+      if (idx === 0) {
+        mergeContours(combinedChildContour, currBranch.contour);
+        prevBranch = currBranch;
+      } else {
+        const gap = getSpacing(prevBranch.id, currBranch.id);
+        const shift = computeContourSeparation(combinedChildContour, currBranch.contour, gap);
+        shiftSubtree(currBranch.id, shift);
+        shiftContour(currBranch.contour, shift);
+        mergeContours(combinedChildContour, currBranch.contour);
+        prevBranch = currBranch;
+      }
+    });
+
+    // Center parents over the midpoint of their children
+    const childXs = children.map((cid) => x[cid]).filter((v) => v !== undefined);
+    const childMinX = safeMin(childXs, 0);
+    const childMaxX = safeMax(childXs, 0);
+    const childCenter = (childMinX + childMaxX) / 2;
+
+    let parentMinX = childCenter;
+    let parentMaxX = childCenter;
+
+    if (spouses.length === 0) {
+      x[nodeId] = childCenter;
+      assigned.add(nodeId);
+      parentMinX = childCenter - opt.nodeRadius;
+      parentMaxX = childCenter + opt.nodeRadius;
+    } else if (spouses.length === 1) {
+      const sp = spouses[0];
+      const isMale = p.sex === 'male';
+      const p1X = childCenter - opt.coupleGap / 2;
+      const p2X = childCenter + opt.coupleGap / 2;
+
+      x[nodeId] = isMale ? p1X : p2X;
+      x[sp] = isMale ? p2X : p1X;
+      assigned.add(nodeId);
+      assigned.add(sp);
+
+      parentMinX = p1X - opt.nodeRadius;
+      parentMaxX = p2X + opt.nodeRadius;
+    } else {
+      // Multi-spouse: center hub in middle, spouses flanking
+      const totalUnits = spouses.length + 1;
+      const startX = childCenter - ((totalUnits - 1) * opt.coupleGap) / 2;
+      const midIdx = Math.floor(spouses.length / 2);
+
+      let curIdx = 0;
+      spouses.slice(0, midIdx).forEach((sid) => {
+        x[sid] = startX + curIdx * opt.coupleGap;
+        assigned.add(sid);
+        curIdx++;
+      });
+
+      x[nodeId] = startX + curIdx * opt.coupleGap;
+      assigned.add(nodeId);
+      curIdx++;
+
+      spouses.slice(midIdx).forEach((sid) => {
+        x[sid] = startX + curIdx * opt.coupleGap;
+        assigned.add(sid);
+        curIdx++;
+      });
+
+      parentMinX = startX - opt.nodeRadius;
+      parentMaxX = (startX + (totalUnits - 1) * opt.coupleGap) + opt.nodeRadius;
+    }
+
+    // Merge parent layer extent into the family contour
+    const fullContour = cloneContour(combinedChildContour);
+    const existingLayerSpan = fullContour.get(pLayer);
+    if (!existingLayerSpan) {
+      fullContour.set(pLayer, { min: parentMinX, max: parentMaxX });
+    } else {
+      existingLayerSpan.min = Math.min(existingLayerSpan.min, parentMinX);
+      existingLayerSpan.max = Math.max(existingLayerSpan.max, parentMaxX);
+    }
+
+    return { contour: fullContour, anchorX: childCenter };
+  };
+
+  // Group roots into connected components
+  const visitedRoots = new Set();
+  const rootTrees = [];
+
+  rootIds.forEach((rid) => {
+    if (visitedRoots.has(rid) || assigned.has(rid)) return;
+    const tree = layoutBranch(rid, visitedRoots);
+    rootTrees.push({ id: rid, ...tree });
+  });
+
+  // Position root trees side by side with contour separation
+  const globalContour = createContour();
+
+  rootTrees.forEach((currTree, idx) => {
+    if (idx === 0) {
+      mergeContours(globalContour, currTree.contour);
+    } else {
+      const gap = opt.nodeGap * 1.5;
+      const shift = computeContourSeparation(globalContour, currTree.contour, gap);
+      shiftSubtree(currTree.id, shift);
+      shiftContour(currTree.contour, shift);
+      mergeContours(globalContour, currTree.contour);
+    }
+  });
+
+  // Assign any remaining unassigned nodes (isolated or disconnected)
   layerNums.forEach((L) => {
-    let curX = 0;
     const list = orderedLayers[L];
-    list.forEach((id, i) => {
-      if (i > 0) curX += getSpacing(list[i - 1], id);
-      x[id] = curX;
+    list.forEach((id) => {
+      if (x[id] === undefined) {
+        const span = globalContour.get(L) || { min: 0, max: 0 };
+        const nextX = span.max + opt.nodeGap;
+        x[id] = nextX;
+        span.max = nextX + opt.nodeRadius;
+        globalContour.set(L, span);
+      }
     });
   });
 
-  const resolveLayer = (L) => {
+  // Layer compaction & non-overlapping resolution (Bilateral Sweep)
+  // Ensures strictly monotone order x[i+1] >= x[i] + spacing on each layer, without rightward feedback drift
+  layerNums.forEach((L) => {
     const list = orderedLayers[L];
     for (let i = 1; i < list.length; i++) {
       const prev = list[i - 1];
       const cur = list[i];
       const minX = x[prev] + getSpacing(prev, cur);
-      if (x[cur] < minX) x[cur] = minX;
+      if (x[cur] < minX) {
+        x[cur] = minX;
+      }
     }
-  };
-
-  // Bottom-up alignment pass: center parents over children
-  const revLayers = [...layerNums].reverse();
-  revLayers.forEach((L) => {
-    const list = orderedLayers[L];
-    list.forEach((id) => {
-      const p = people[id];
-      const cXs = (p.childIds || []).map((cid) => x[cid]).filter((v) => v !== undefined);
-      if (cXs.length > 0) {
-        const cMin = safeMin(cXs, 0);
-        const cMax = safeMax(cXs, 0);
-        const cCenter = (cMin + cMax) / 2;
-        const isMale = p.sex === 'male';
-        const hasSpouse = (p.spouseIds || []).some((sid) => orderedLayers[L].includes(sid));
-        if (hasSpouse) {
-          x[id] = cCenter + (isMale ? -opt.coupleGap : opt.coupleGap) / 2;
-        } else {
-          x[id] = cCenter;
-        }
-      }
-    });
-    resolveLayer(L);
   });
 
-  // Top-down alignment pass: center children under parents
-  layerNums.forEach((L) => {
-    const list = orderedLayers[L];
-    list.forEach((id) => {
-      const famOrig = familyOfOrigin[id];
-      if (famOrig && famOrig.parents.length > 0) {
-        const pXs = famOrig.parents.map((pid) => x[pid]).filter((v) => v !== undefined);
-        if (pXs.length > 0) {
-          const pCenter = pXs.reduce((a, b) => a + b, 0) / pXs.length;
-          const sibs = famOrig.children;
-          const sIdx = sibs.indexOf(id);
-          const totalSibs = sibs.length;
-          const sibOffset = (sIdx - (totalSibs - 1) / 2) * Math.max(opt.nodeGap, (widthOf[id] || opt.nodeGap));
-          x[id] = pCenter + sibOffset;
+  // Consanguinity spring pass: gently pull distant consanguineous spouses closer if there is free space
+  families.forEach((fam) => {
+    if (fam.consanguineous && fam.parents.length === 2) {
+      const [p1, p2] = fam.parents;
+      if (layerOf[p1] === layerOf[p2] && x[p1] !== undefined && x[p2] !== undefined) {
+        const L = layerOf[p1];
+        const list = orderedLayers[L];
+        const idx1 = list.indexOf(p1);
+        const idx2 = list.indexOf(p2);
+        // If adjacent on layer, pull to coupleGap
+        if (Math.abs(idx1 - idx2) === 1) {
+          const left = idx1 < idx2 ? p1 : p2;
+          const right = idx1 < idx2 ? p2 : p1;
+          const desired = x[left] + opt.coupleGap;
+          if (x[right] > desired) {
+            const shift = (x[right] - desired) * 0.5;
+            x[right] -= shift;
+            x[left] += shift;
+          }
         }
       }
-    });
-    resolveLayer(L);
+    }
   });
 
-  // Iterative damped relaxation for convergence
-  const passes = Math.min(30, Math.max(12, Math.floor(400 / Math.max(layerNums.length, 1))));
-  for (let pass = 0; pass < passes; pass++) {
-    const isUp = pass % 2 === 0;
-    const seq = isUp ? [...layerNums].reverse() : layerNums;
-
-    seq.forEach((L) => {
-      const list = orderedLayers[L];
-      list.forEach((id) => {
-        const p = people[id];
-        let sum = 0, count = 0;
-
-        // Pull towards parents
-        const famOrig = familyOfOrigin[id];
-        if (famOrig && famOrig.parents.length > 0) {
-          const pXs = famOrig.parents.map((pid) => x[pid]).filter((v) => v !== undefined);
-          if (pXs.length) {
-            const pCenter = pXs.reduce((a, b) => a + b, 0) / pXs.length;
-            const sibs = famOrig.children;
-            const sIdx = sibs.indexOf(id);
-            const totalSibs = sibs.length;
-            const sibOffset = (sIdx - (totalSibs - 1) / 2) * opt.nodeGap;
-            sum += (pCenter + sibOffset) * 2.0;
-            count += 2.0;
-          }
-        }
-
-        // Pull towards children midpoint
-        const cXs = (p.childIds || []).map((cid) => x[cid]).filter((v) => v !== undefined);
-        if (cXs.length > 0) {
-          const cCenter = (safeMin(cXs, 0) + safeMax(cXs, 0)) / 2;
-          const isMale = p.sex === 'male';
-          const hasSpouse = (p.spouseIds || []).some((sid) => orderedLayers[L].includes(sid));
-          const desired = hasSpouse ? cCenter + (isMale ? -opt.coupleGap : opt.coupleGap) / 2 : cCenter;
-          sum += desired * 2.0;
-          count += 2.0;
-        }
-
-        // Keep spouses adjacent
-        (p.spouseIds || []).forEach((sid) => {
-          if (x[sid] !== undefined && orderedLayers[L].includes(sid)) {
-            const desiredOffset = (people[id].sex === 'male' ? -opt.coupleGap : opt.coupleGap) / 2;
-            sum += (x[sid] + desiredOffset) * 0.8;
-            count += 0.8;
-          }
-        });
-
-        if (count > 0) {
-          const target = sum / count;
-          x[id] = x[id] * 0.5 + target * 0.5;
-        }
-      });
-
-      resolveLayer(L);
-    });
-  }
-
-  // Final resolution pass to ensure strict minimum spacing
-  layerNums.forEach((L) => resolveLayer(L));
+  // Final layer normalization: shift entire diagram so left-most node is at 0
+  const allX = Object.values(x);
+  const minAllX = safeMin(allX, 0);
+  Object.keys(x).forEach((id) => {
+    x[id] -= minAllX;
+  });
 
   return x;
 }
 
-// ---------------- Stage 7: Family Connectors with Interval Scheduling ----------------
+// ---------------- Collision Detection & Dynamic Clearance ----------------
+
+/**
+ * Calculates the required minimum center-to-center distance between two individuals
+ * taking into account biological relationships, spouse status, and twin pairs.
+ */
+export function getRequiredSeparation(id1, id2, people, opt = DEFAULTS) {
+  if (!id1 || !id2 || !people[id1] || !people[id2]) return opt.nodeGap;
+  const p1 = people[id1];
+  const p2 = people[id2];
+
+  // Spouses need coupleGap
+  if (p1.spouseIds?.includes(id2) || p2.spouseIds?.includes(id1)) {
+    return opt.coupleGap;
+  }
+
+  // Twins need twinGap
+  const t1 = p1.twinType, t2 = p2.twinType;
+  if (t1 && t1 !== 'none' && t2 && t2 !== 'none' && t1 === t2) {
+    const matchGroup = p1.twinGroupId && p2.twinGroupId && p1.twinGroupId === p2.twinGroupId;
+    const matchDirect = p1.twinWithId === id2 || p2.twinWithId === id1;
+    const matchFallback = !p1.twinGroupId && !p2.twinGroupId;
+    if (matchGroup || matchDirect || matchFallback) {
+      return opt.twinGap;
+    }
+  }
+
+  // General nodes / siblings / separate branches
+  return opt.nodeGap;
+}
+
+/**
+ * Detects all active collisions and clearance violations in the pedigree.
+ * Examines both same-generation horizontal overlaps and cross-generation vertical overlaps.
+ */
+export function detectCollisions(nodes, people, layerOf, opt = DEFAULTS) {
+  const collisions = [];
+  const ids = Object.keys(nodes);
+  if (ids.length <= 1) {
+    return { hasCollisions: false, totalCount: 0, collisions: [] };
+  }
+
+  // Group nodes by generation layer
+  const byLayer = new Map();
+  ids.forEach((id) => {
+    const L = layerOf[id] ?? 0;
+    if (!byLayer.has(L)) byLayer.set(L, []);
+    byLayer.get(L).push(id);
+  });
+
+  byLayer.forEach((layerIds, L) => {
+    // Sort nodes on this layer by X coordinate
+    const sorted = [...layerIds].sort((a, b) => (nodes[a]?.x ?? 0) - (nodes[b]?.x ?? 0));
+
+    for (let i = 0; i < sorted.length - 1; i++) {
+      for (let j = i + 1; j < sorted.length; j++) {
+        const id1 = sorted[i];
+        const id2 = sorted[j];
+        const x1 = nodes[id1]?.x ?? 0;
+        const x2 = nodes[id2]?.x ?? 0;
+        const dist = x2 - x1;
+        const minReq = getRequiredSeparation(id1, id2, people, opt);
+
+        if (dist < minReq - 0.001) {
+          collisions.push({
+            id1,
+            id2,
+            layer: L,
+            x1,
+            x2,
+            distance: dist,
+            minRequired: minReq,
+            overlap: minReq - dist,
+            type: 'same_layer',
+          });
+        }
+
+        // Optimization: since nodes are sorted by X, if dist already exceeds max gap, break early
+        if (dist >= opt.nodeGap * 2.5) {
+          break;
+        }
+      }
+    }
+  });
+
+  // Check for cross-layer vertical collisions if individuals are placed on overlapping coordinates
+  for (let i = 0; i < ids.length - 1; i++) {
+    for (let j = i + 1; j < ids.length; j++) {
+      const id1 = ids[i], id2 = ids[j];
+      if (layerOf[id1] !== layerOf[id2]) {
+        const n1 = nodes[id1], n2 = nodes[id2];
+        const dx = Math.abs((n1?.x ?? 0) - (n2?.x ?? 0));
+        const dy = Math.abs((n1?.y ?? 0) - (n2?.y ?? 0));
+        if (dx < opt.nodeRadius * 1.5 && dy < opt.nodeRadius * 1.5) {
+          collisions.push({
+            id1,
+            id2,
+            layer1: layerOf[id1],
+            layer2: layerOf[id2],
+            distance: Math.hypot(dx, dy),
+            minRequired: opt.nodeRadius * 2,
+            overlap: opt.nodeRadius * 2 - Math.hypot(dx, dy),
+            type: 'cross_layer',
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    hasCollisions: collisions.length > 0,
+    totalCount: collisions.length,
+    collisions,
+  };
+}
+
+/**
+ * Automatically resolves collisions and adjusts node spacing in dense pedigrees.
+ * Uses an iterative relaxation and subtree propagation approach to separate overlapping nodes
+ * while preserving parent-child vertical alignments and marital groupings.
+ */
+export function resolveCollisions(nodes, people, families, layerOf, opt = DEFAULTS) {
+  const initialCheck = detectCollisions(nodes, people, layerOf, opt);
+  if (!initialCheck.hasCollisions) {
+    return {
+      resolved: true,
+      iterations: 0,
+      initialCollisions: 0,
+      finalCollisions: 0,
+      adjustedCount: 0,
+    };
+  }
+
+  const ids = Object.keys(nodes);
+  const byLayer = new Map();
+  ids.forEach((id) => {
+    const L = layerOf[id] ?? 0;
+    if (!byLayer.has(L)) byLayer.set(L, []);
+    byLayer.get(L).push(id);
+  });
+
+  // Helper to shift a node and all its descendants
+  const shiftBranch = (rootId, dx, visited = new Set()) => {
+    if (!rootId || visited.has(rootId)) return;
+    visited.add(rootId);
+    if (nodes[rootId]) nodes[rootId].x += dx;
+
+    // Shift spouses placed with this node
+    (people[rootId]?.spouseIds || []).forEach((sid) => {
+      if (!visited.has(sid) && layerOf[sid] === layerOf[rootId] && nodes[sid]) {
+        visited.add(sid);
+        nodes[sid].x += dx;
+      }
+    });
+
+    // Shift children
+    (people[rootId]?.childIds || []).forEach((cid) => {
+      shiftBranch(cid, dx, visited);
+    });
+  };
+
+  let adjustedCount = 0;
+  const maxIterations = 25;
+  let iter = 0;
+
+  for (iter = 0; iter < maxIterations; iter++) {
+    let hadCollisionThisPass = false;
+
+    // Process each generation layer
+    const layers = [...byLayer.keys()].sort((a, b) => a - b);
+    for (const L of layers) {
+      const layerIds = byLayer.get(L) || [];
+      if (layerIds.length < 2) continue;
+
+      // Sort nodes on this layer by current X coordinate
+      layerIds.sort((a, b) => (nodes[a]?.x ?? 0) - (nodes[b]?.x ?? 0));
+
+      for (let i = 0; i < layerIds.length - 1; i++) {
+        const id1 = layerIds[i];
+        const id2 = layerIds[i + 1];
+        const x1 = nodes[id1]?.x ?? 0;
+        const x2 = nodes[id2]?.x ?? 0;
+        const minReq = getRequiredSeparation(id1, id2, people, opt);
+        const dist = x2 - x1;
+
+        if (dist < minReq - 0.001) {
+          hadCollisionThisPass = true;
+          const overlap = minReq - dist;
+          adjustedCount++;
+
+          // Shift id2 and its descendants by overlap
+          shiftBranch(id2, overlap);
+
+          // Cascade forward on layer if subsequent nodes are pushed
+          for (let k = i + 2; k < layerIds.length; k++) {
+            const prevId = layerIds[k - 1];
+            const nextId = layerIds[k];
+            const prevX = nodes[prevId]?.x ?? 0;
+            const nextX = nodes[nextId]?.x ?? 0;
+            const stepMin = getRequiredSeparation(prevId, nextId, people, opt);
+            if (nextX - prevX < stepMin) {
+              const forwardShift = stepMin - (nextX - prevX);
+              shiftBranch(nextId, forwardShift);
+            } else {
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // Re-center parents over children after subtrees moved
+    families.forEach((fam) => {
+      if (fam.parents.length > 0 && fam.children.length > 0) {
+        const cXs = fam.children.map((cid) => nodes[cid]?.x).filter((v) => v !== undefined);
+        if (cXs.length > 0) {
+          const cCenter = (safeMin(cXs, 0) + safeMax(cXs, 0)) / 2;
+          if (fam.parents.length === 1) {
+            const pid = fam.parents[0];
+            if (nodes[pid]) nodes[pid].x = cCenter;
+          } else if (fam.parents.length === 2) {
+            const [p1, p2] = fam.parents;
+            if (nodes[p1] && nodes[p2]) {
+              const currentMid = (nodes[p1].x + nodes[p2].x) / 2;
+              const diff = cCenter - currentMid;
+              nodes[p1].x += diff * 0.7;
+              nodes[p2].x += diff * 0.7;
+            }
+          }
+        }
+      }
+    });
+
+    if (!hadCollisionThisPass) {
+      break;
+    }
+  }
+
+  // Final check
+  const finalCheck = detectCollisions(nodes, people, layerOf, opt);
+
+  // Normalize so minX is 0
+  const allX = Object.values(nodes).map((n) => n.x);
+  const minAllX = safeMin(allX, 0);
+  ids.forEach((id) => {
+    if (nodes[id]) nodes[id].x -= minAllX;
+  });
+
+  return {
+    resolved: !finalCheck.hasCollisions,
+    iterations: iter + 1,
+    initialCollisions: initialCheck.totalCount,
+    finalCollisions: finalCheck.totalCount,
+    adjustedCount,
+  };
+}
+
+// ---------------- Stage 7: Connectors Routing & Interval Scheduling ----------------
 function buildConnectors(families, people, layerOf, nodeXY, opt) {
   const yOf = (L) => L * opt.layerGap;
   const r = opt.nodeRadius;
@@ -574,6 +994,7 @@ function buildConnectors(families, people, layerOf, nodeXY, opt) {
     childLink: [],
     longEdge: [],
     twinBars: [],
+    twinMarks: [],
   };
 
   const familiesList = [...families.values()].filter((f) => f.parents.length > 0);
@@ -616,7 +1037,7 @@ function buildConnectors(families, people, layerOf, nodeXY, opt) {
         lane = lanes.length;
         lanes.push(max);
       }
-      busYMap.set(fam.id, baseBusY + lane * 10);
+      busYMap.set(fam.id, baseBusY + lane * 12);
     });
   });
 
@@ -639,17 +1060,41 @@ function buildConnectors(families, people, layerOf, nodeXY, opt) {
       const lineX1 = minX + r;
       const lineX2 = Math.max(lineX1, maxX - r);
 
-      connectors.mating.push({
-        x1: lineX1,
-        y1: parentY,
-        x2: lineX2,
-        y2: parentY,
-        consanguineous,
-        parents: [p1, p2],
-      });
+      // Check if spouses are separated by other individuals on that layer
+      const spanDistance = maxX - minX;
+      const isDistantCousin = consanguineous && spanDistance > opt.coupleGap * 2.2;
 
-      junctionX = (x1 + x2) / 2;
-      dropStartY = parentY;
+      if (isDistantCousin) {
+        // Orthogonal bridge connector that routes below node glyphs to avoid cutting through people
+        const bridgeY = parentY + r + 14;
+        connectors.mating.push({
+          x1: lineX1,
+          y1: parentY,
+          x2: lineX2,
+          y2: parentY,
+          consanguineous: true,
+          parents: [p1, p2],
+          points: [
+            [minX, parentY + r],
+            [minX, bridgeY],
+            [maxX, bridgeY],
+            [maxX, parentY + r],
+          ],
+        });
+        junctionX = (x1 + x2) / 2;
+        dropStartY = bridgeY;
+      } else {
+        connectors.mating.push({
+          x1: lineX1,
+          y1: parentY,
+          x2: lineX2,
+          y2: parentY,
+          consanguineous,
+          parents: [p1, p2],
+        });
+        junctionX = (x1 + x2) / 2;
+        dropStartY = parentY;
+      }
     } else if (parents.length === 1) {
       junctionX = nodeXY[parents[0]]?.x ?? 0;
       dropStartY = parentY + r;
@@ -720,7 +1165,7 @@ function buildConnectors(families, people, layerOf, nodeXY, opt) {
         y2: busY,
       });
 
-      // Horizontal sibship bus line (drawn only between distinct attachment points)
+      // Horizontal sibship bus line
       if (busMinX !== busMaxX) {
         connectors.sibship.push({
           x1: busMinX,
@@ -733,7 +1178,6 @@ function buildConnectors(families, people, layerOf, nodeXY, opt) {
 
       // 3. Draw twin connectors (inverted V-fork, horizontal bar for MZ, '?' for unknown)
       twinSets.forEach(({ members, twinType, apexX }) => {
-        // Angled arms from apex point on bus down to each twin
         members.forEach((mid) => {
           const mx = nodeXY[mid]?.x ?? apexX;
           connectors.childLink.push({
@@ -822,10 +1266,19 @@ function normalizeBounds(ids, nodes, connectors, opt) {
   });
 
   connectors.mating.forEach((s) => {
-    minX = Math.min(minX, s.x1, s.x2);
-    maxX = Math.max(maxX, s.x1, s.x2);
-    minY = Math.min(minY, s.y1, s.y2);
-    maxY = Math.max(maxY, s.y1, s.y2);
+    if (s.points) {
+      s.points.forEach(([px, py]) => {
+        minX = Math.min(minX, px);
+        maxX = Math.max(maxX, px);
+        minY = Math.min(minY, py);
+        maxY = Math.max(maxY, py);
+      });
+    } else {
+      minX = Math.min(minX, s.x1, s.x2);
+      maxX = Math.max(maxX, s.x1, s.x2);
+      minY = Math.min(minY, s.y1, s.y2);
+      maxY = Math.max(maxY, s.y1, s.y2);
+    }
   });
 
   connectors.sibship.forEach((s) => {
@@ -852,6 +1305,9 @@ function normalizeBounds(ids, nodes, connectors, opt) {
 
   connectors.mating.forEach((s) => {
     s.x1 += dx; s.x2 += dx; s.y1 += dy; s.y2 += dy;
+    if (s.points) {
+      s.points = s.points.map(([px, py]) => [px + dx, py + dy]);
+    }
   });
   connectors.drop.forEach((s) => {
     s.x += dx; s.y1 += dy; s.y2 += dy;
@@ -884,6 +1340,168 @@ function normalizeBounds(ids, nodes, connectors, opt) {
   return { minX: 0, minY: 0, maxX: width, maxY: height, width, height };
 }
 
+// ---------------- Debug Bounding Boxes & Collision Visualizer ----------------
+
+/**
+ * Computes bounding boxes around all nodes and connection lines
+ * to visually confirm collision detection, envelopes, and spacing logic.
+ *
+ * @param {Object} nodes - Map of nodeId -> { x, y }
+ * @param {Object} connectors - Connector lines object
+ * @param {Object} people - People dictionary
+ * @param {Object} opt - Layout configuration options
+ * @returns {{
+ *   nodes: Array<{ id: string, type: string, x: number, y: number, width: number, height: number, label: string, clearanceBox: Object }>,
+ *   connectors: Array<{ id: string, type: string, subType?: string, x: number, y: number, width: number, height: number, label: string, points?: Array }>
+ * }}
+ */
+export function computeDebugBoundingBoxes(nodes, connectors, people = {}, opt = DEFAULTS) {
+  const r = opt.nodeRadius || 28;
+  const nodeBoxes = [];
+  const connectorBoxes = [];
+
+  // 1. Node Bounding Envelopes
+  Object.entries(nodes || {}).forEach(([id, pos]) => {
+    if (!pos || pos.x === undefined || pos.y === undefined) return;
+    const p = people[id] || {};
+    const halfWidth = r + 8;
+    const topHeight = r + 6;
+    const bottomHeight = r + 24;
+
+    const boxX = pos.x - halfWidth;
+    const boxY = pos.y - topHeight;
+    const boxW = halfWidth * 2;
+    const boxH = topHeight + bottomHeight;
+
+    const isSpouse = (p.spouseIds || []).length > 0;
+    const reqGap = isSpouse ? opt.coupleGap : opt.nodeGap;
+    const clearanceW = reqGap;
+    const clearanceX = pos.x - clearanceW / 2;
+
+    nodeBoxes.push({
+      id,
+      type: 'node',
+      x: Math.round(boxX),
+      y: Math.round(boxY),
+      width: Math.round(boxW),
+      height: Math.round(boxH),
+      centerX: Math.round(pos.x),
+      centerY: Math.round(pos.y),
+      label: `${p.name || id} (${Math.round(pos.x)},${Math.round(pos.y)})`,
+      clearanceBox: {
+        x: Math.round(clearanceX),
+        y: Math.round(boxY - 4),
+        width: Math.round(clearanceW),
+        height: Math.round(boxH + 8),
+      },
+    });
+  });
+
+  // 2. Connector Lines Bounding Envelopes
+  (connectors?.mating || []).forEach((m, idx) => {
+    if (m.points && m.points.length > 0) {
+      const xs = m.points.map((pt) => pt[0]);
+      const ys = m.points.map((pt) => pt[1]);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      connectorBoxes.push({
+        id: `mat-${idx}`,
+        type: 'mating',
+        subType: m.consanguineous ? 'consanguineous_bridge' : 'bridge',
+        x: Math.round(minX - 4),
+        y: Math.round(minY - 4),
+        width: Math.round(maxX - minX + 8),
+        height: Math.round(maxY - minY + 8),
+        label: m.consanguineous ? 'پل خویشاوندی' : 'پل ازدواج',
+        points: m.points,
+      });
+    } else if (m.x1 !== undefined && m.x2 !== undefined) {
+      const minX = Math.min(m.x1, m.x2);
+      const maxX = Math.max(m.x1, m.x2);
+      const y = m.y1 ?? m.y2;
+      connectorBoxes.push({
+        id: `mat-${idx}`,
+        type: 'mating',
+        subType: m.consanguineous ? 'consanguineous' : 'standard',
+        x: Math.round(minX - 4),
+        y: Math.round(y - 6),
+        width: Math.round(maxX - minX + 8),
+        height: 12,
+        label: m.consanguineous ? 'ازدواج فامیلی' : 'ازدواج',
+      });
+    }
+  });
+
+  (connectors?.sibship || []).forEach((s, idx) => {
+    if (s.x1 !== undefined && s.x2 !== undefined) {
+      const minX = Math.min(s.x1, s.x2);
+      const maxX = Math.max(s.x1, s.x2);
+      connectorBoxes.push({
+        id: `sib-${idx}`,
+        type: 'sibship',
+        x: Math.round(minX - 4),
+        y: Math.round(s.y - 6),
+        width: Math.round(maxX - minX + 8),
+        height: 12,
+        label: 'گذرگاه فرزندان',
+      });
+    }
+  });
+
+  (connectors?.drop || []).forEach((d, idx) => {
+    const minY = Math.min(d.y1, d.y2);
+    const maxY = Math.max(d.y1, d.y2);
+    connectorBoxes.push({
+      id: `drp-${idx}`,
+      type: 'drop',
+      x: Math.round(d.x - 6),
+      y: Math.round(minY),
+      width: 12,
+      height: Math.round(maxY - minY),
+      label: 'خط فرود',
+    });
+  });
+
+  (connectors?.childLink || []).forEach((c, idx) => {
+    const x1 = c.x1 ?? c.x;
+    const x2 = c.x2 ?? c.x;
+    const minX = Math.min(x1, x2);
+    const maxX = Math.max(x1, x2);
+    const minY = Math.min(c.y1, c.y2);
+    const maxY = Math.max(c.y1, c.y2);
+    connectorBoxes.push({
+      id: `cl-${idx}`,
+      type: 'childLink',
+      x: Math.round(minX - 4),
+      y: Math.round(minY),
+      width: Math.round(Math.max(8, maxX - minX + 8)),
+      height: Math.round(maxY - minY),
+      label: 'اتصال فرزند',
+    });
+  });
+
+  (connectors?.twinBars || []).forEach((tb, idx) => {
+    const minX = Math.min(tb.x1, tb.x2);
+    const maxX = Math.max(tb.x1, tb.x2);
+    connectorBoxes.push({
+      id: `tb-${idx}`,
+      type: 'twinBar',
+      x: Math.round(minX - 2),
+      y: Math.round(tb.y - 4),
+      width: Math.round(maxX - minX + 4),
+      height: 8,
+      label: 'نوار دوقلوی همسان',
+    });
+  });
+
+  return {
+    nodes: nodeBoxes,
+    connectors: connectorBoxes,
+  };
+}
+
 // ---------------- Public Layout API ----------------
 export function computePedigreeLayout(data, options = {}) {
   const opt = { ...DEFAULTS, ...options };
@@ -895,8 +1513,8 @@ export function computePedigreeLayout(data, options = {}) {
   const { families, familyOfOrigin } = buildFamilies(people, ids, getAncestors);
   const layerOf = assignGenerations(ids, people, families, getAncestors);
   const clusters = buildLayerClusters(people, ids, families, layerOf, familyOfOrigin);
-  const ordering = orderLayers(people, ids, families, layerOf, clusters, opt);
-  const x = assignCoordinates(people, families, familyOfOrigin, ordering, opt);
+  const ordering = orderLayers(people, ids, families, layerOf, clusters);
+  const x = assignCoordinates(people, families, familyOfOrigin, ordering, layerOf, opt);
 
   const nodes = {};
   ids.forEach((id) => {
@@ -906,6 +1524,9 @@ export function computePedigreeLayout(data, options = {}) {
     };
   });
 
+  // Dedicated collision detection and automated spacing adjustment stage
+  const collisionReport = resolveCollisions(nodes, people, families, layerOf, opt);
+
   const connectors = buildConnectors(families, people, layerOf, nodes, opt);
   const bounds = normalizeBounds(ids, nodes, connectors, opt);
 
@@ -914,7 +1535,9 @@ export function computePedigreeLayout(data, options = {}) {
     generations[id] = layerOf[id] ?? 0;
   });
 
-  return { nodes, connectors, generations, bounds };
+  const debugBoxes = computeDebugBoundingBoxes(nodes, connectors, people, opt);
+
+  return { nodes, connectors, generations, bounds, collisions: collisionReport, debugBoxes };
 }
 
 export default computePedigreeLayout;
